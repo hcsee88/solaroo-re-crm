@@ -1,0 +1,33 @@
+{
+  "name": "solaroo-re-crm",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Solaroo RE CRM — project-lifecycle CRM for offgrid solar and BESS projects",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "db:migrate": "turbo run db:migrate --filter=@solaroo/db",
+    "db:generate": "turbo run db:generate --filter=@solaroo/db",
+    "db:studio": "cd packages/db && npx prisma studio",
+    "db:seed": "turbo run db:seed --filter=@solaroo/db"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.0",
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0",
+    "prettier": "^3.2.0",
+    "eslint": "^8.57.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.0.0"
+}

@@ -1,0 +1,140 @@
+// auth.prisma — users, roles, permissions, teams
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String
+  avatarUrl     String?
+  passwordHash  String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  role          Role     @relation(fields: [roleId], references: [id])
+  roleId        String
+
+  teamMemberships TeamMember[]
+
+  // Per-user permission overrides
+  userPermissions        UserPermission[]
+  projectMemberships     ProjectMember[]
+  opportunityMemberships OpportunityMember[]
+
+  // Owned records
+  ownedOpportunities  Opportunity[] @relation("OpportunityOwner")
+  ownedProjects       Project[]     @relation("ProjectManager")
+  blockerProjects     Project[]     @relation("BlockerOwner")
+  ownedGates          ProjectGate[] @relation("GateOwner")
+  assignedTasks       Task[]        @relation("TaskAssignee")
+  approvals               ProposalApproval[]      @relation("Approver")
+  projectTeamAssignments  ProjectTeamAssignment[]
+  auditLogs               AuditLog[]
+  notifications       Notification[]
+  uploadedDocuments   Document[]    @relation("DocumentOwner")
+
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique // e.g. DIRECTOR, SALES_MANAGER, PROJECT_MANAGER
+  displayName String
+  description String?
+  createdAt   DateTime @default(now())
+
+  users       User[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  resource    String   // e.g. "opportunity", "proposal", "purchase_order"
+  action      String   // e.g. "view", "create", "edit", "submit", "approve", "export", "delete"
+  scope       String   @default("all") // "own", "team", "assigned", "all"
+  description String?
+
+  rolePermissions RolePermission[]
+  userPermissions UserPermission[]
+
+  @@unique([resource, action, scope])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// Per-user permission overrides — grants or explicit denies on top of role defaults
+model UserPermission {
+  userId       String
+  permissionId String
+  granted      Boolean   @default(true)  // false = explicit deny
+  grantedById  String?
+  grantedAt    DateTime  @default(now())
+
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@map("user_permissions")
+}
+
+// Project membership — used for "assigned" scope resolution on project resources
+model ProjectMember {
+  projectId  String
+  userId     String
+  memberRole String   @default("MEMBER") // "PM", "ENGINEER", "VIEWER"
+  addedAt    DateTime @default(now())
+
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, userId])
+  @@map("project_members")
+}
+
+// Opportunity membership — used for "assigned" scope resolution on opportunity resources
+model OpportunityMember {
+  opportunityId String
+  userId        String
+  memberRole    String   @default("MEMBER")
+  addedAt       DateTime @default(now())
+
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([opportunityId, userId])
+  @@map("opportunity_members")
+}
+
+model Team {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  members     TeamMember[]
+
+  @@map("teams")
+}
+
+model TeamMember {
+  userId    String
+  teamId    String
+  joinedAt  DateTime @default(now())
+
+  user      User @relation(fields: [userId], references: [id])
+  team      Team @relation(fields: [teamId], references: [id])
+
+  @@id([userId, teamId])
+  @@map("team_members")
+}

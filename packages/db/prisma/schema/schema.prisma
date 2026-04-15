@@ -1,0 +1,11 @@
+// schema.prisma — root schema file: datasource + generator + imports
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["prismaSchemaFolder"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}

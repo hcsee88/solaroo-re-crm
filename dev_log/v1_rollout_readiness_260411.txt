@@ -1,0 +1,384 @@
+================================================================================
+SOLAROO RE CRM — V1 ROLLOUT READINESS REPORT
+Date: 2026-04-11
+Prepared by: Claude (code-level audit — not a live browser session)
+================================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. DESIGN_LEAD V1 ROLE RECOMMENDATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ROLE:     DESIGN_LEAD
+PURPOSE:  Head of Design Department — technical oversight across sales-to-delivery
+          lifecycle. Bridges the handover from pre-sales technical work to project
+          execution. Approves all design artefacts.
+
+POSITIONING:
+  DESIGN_LEAD sits above DESIGN_ENGINEER in technical authority.
+  They are NOT a sales role and should not create or edit commercial records.
+  They are NOT a project manager — they do not control project timelines, budgets,
+  or gate approvals except for design-specific gates when directly assigned.
+  They DO own all things technical: assessments, drawings, documents, design quality.
+
+V1 DECISION RATIONALE:
+  The practical problem this role solves is:
+    "Who can actually approve a drawing or a technical assessment before it goes
+     to the Director for final sign-off?"
+  In V1, DIRECTOR is the only approver for drawings and technical assessments.
+  This creates a bottleneck. DESIGN_LEAD relieves it at the design level.
+
+  The Design Lead also needs full pipeline and project visibility to plan design
+  resource — they cannot plan without knowing what is coming in the funnel.
+
+  They explicitly should NOT access finance/commercial records, user management,
+  or have the power to create/approve opportunities or proposals.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. DESIGN_LEAD PERMISSIONS ADDED (permissions.seed.ts)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Seed result: 262 permissions seeded, 449 role-permission links created
+(Previous: same 262 permission definitions, fewer role links — DESIGN_LEAD had 0)
+1 new permission entry added: technical_assessment:approve:all (new for DESIGN_LEAD)
+
+RESOURCE                    ACTION    SCOPE      RATIONALE
+─────────────────────────── ───────── ──────────────────────────────────────────
+account                     view      all        Context for project sites/clients
+site                        view      all        Design context for all sites
+opportunity                 view      all        Full pipeline visibility for
+                                                 design resource planning
+site_assessment             view      all        See all site assessments
+site_assessment             create    all        Can initiate site assessments
+site_assessment             edit      all        Can update any site assessment
+technical_assessment        view      all        Full technical oversight
+technical_assessment        create    all        Can create assessments for any opp
+technical_assessment        create    assigned   Can create when assigned
+technical_assessment        edit      all        Can edit any technical assessment
+technical_assessment        edit      assigned   Can edit when assigned
+technical_assessment        submit    assigned   Can submit when assigned
+technical_assessment        approve   all        *** KEY *** — approves tech
+                                                 assessments. DESIGN_ENGINEER
+                                                 submits; DESIGN_LEAD approves.
+proposal                    view      all        Reviews technical content of
+                                                 all proposals
+proposal_version            view      all        Reviews all proposal versions
+project                     view      all        Full project visibility for
+                                                 design workload management
+project_gate                view      all        Sees all gate status
+project_gate                approve   assigned   Can approve gates when assigned
+                                                 (e.g., Design Freeze gate)
+milestone                   view      all        Sees all milestones
+issue                       view      all        Sees all technical issues
+issue                       create    all        Can raise design issues
+issue                       edit      all        Can resolve design issues
+risk                        view      all        Sees all project risks
+risk                        create    all        Can raise design risks
+risk                        edit      all        Can update design risks
+document                    view      all        Full document visibility
+document                    create    all        Can create design docs
+document                    edit      all        Can edit design docs
+document                    submit    assigned   Can submit when assigned
+document                    approve   all        *** KEY *** — approves design docs
+document                    export    all        Can export for external use
+drawing                     view      all        Full drawing visibility
+drawing                     create    all        Can create drawings
+drawing                     create    assigned   Can create when assigned
+drawing                     edit      all        Can edit any drawing
+drawing                     edit      assigned   Can edit when assigned
+drawing                     submit    assigned   Can submit drawings
+drawing                     approve   all        *** KEY *** — approves all drawings
+vendor                      view      all        Equipment/supplier reference
+rfq                         view      assigned   Can see RFQs for assigned projects
+quote                       view      assigned   Can see quotes for assigned projects
+reporting                   view      all        Full dashboard access — needed
+                                                 to monitor design pipeline load
+
+EXPLICITLY EXCLUDED (by design — not overbuild):
+  opportunity: create / edit / approve / export   (sales domain)
+  proposal: create / edit / approve / export      (sales domain)
+  project: create / edit / approve / export       (PM/Director domain)
+  project_gate: create / edit / submit            (PM domain)
+  milestone: create / edit                        (PM domain)
+  risk: edit:assigned                             (PM owns resolution)
+  rfq: create / edit / approve                    (procurement domain)
+  quote: create / edit                            (procurement domain)
+  purchase_order: any                             (procurement domain)
+  site_log / checklist / punch_list: any          (site execution domain)
+  testing_sheet / handover_doc / asset: any       (commissioning domain)
+  maintenance_ticket / warranty_record: any       (O&M domain)
+  contract / invoice_milestone: any               (finance domain)
+  margin / cost / payment_status: any             (finance, restricted)
+  user_admin / role_admin: any                    (super admin only)
+  reporting: export                               (not needed in V1)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. VERIFIED V1 FEATURES (code-level review)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Feature                                              Status
+─────────────────────────────────────────────────── ─────────────────────────────
+Opportunity next-action fields in Prisma schema      VERIFIED (crm.prisma)
+nextAction/nextActionDueDate/lastStatusNote in
+  OPP_SELECT (opportunities.service.ts)              VERIFIED
+nextAction fields in UpdateOpportunitySchema dto     VERIFIED
+nextActionDueDate Date conversion in service.update  VERIFIED (line 250)
+Overdue filter in OpportunityQuerySchema             VERIFIED (z.string→boolean)
+Overdue filter logic in findAll service              VERIFIED (nextActionDueDate<now,
+                                                       stage notIn WON/LOST)
+nextActionDueDate in sortBy enum                     VERIFIED
+Next-action column + NextActionCell in opp list UI   VERIFIED (code present)
+Overdue pill filter + URL-based state (?overdue=true)VERIFIED (code present)
+Dashboard overdue count as clickable link            VERIFIED (code present)
+
+RAG fields (ragStatus/currentBlocker/blockerDueDate)
+  in projects Prisma schema                          VERIFIED (projects.prisma)
+RAG fields in UpdateProjectSchema dto                VERIFIED (lines 50-53)
+RAG fields in project SELECT (projects.service.ts)   VERIFIED (lines 77-79)
+RagPanel inline edit on project detail page          VERIFIED (code present)
+
+Reporting service getDashboardMetrics                VERIFIED (full Prisma queries)
+reporting.controller.ts correct import paths         VERIFIED
+  (common/authz/permission.guard, require-permission)
+Dashboard page fetches /reporting/dashboard          VERIFIED (React Query)
+Dashboard renders pipeline/proposals/projects        VERIFIED
+
+Login queryClient.clear() on login                   VERIFIED (login-form.tsx)
+Logout queryClient.clear() on logout                 VERIFIED (topbar.tsx)
+
+PATCH /auth/change-password backend                  VERIFIED (auth.controller +
+                                                       auth.service — bcrypt verify
+                                                       current pw before change)
+Change Password modal in topbar                      VERIFIED (code present,
+                                                       3-field form, inline error)
+
+Admin reset password (POST /admin/users/:id/         VERIFIED — backend
+  reset-password)                                      (admin.service.ts line 161)
+                                                       and frontend
+                                                       (admin/users/[id]/page.tsx)
+
+No /auth/register endpoint                           VERIFIED SAFE — no such
+                                                       route exists. User creation
+                                                       only via /admin/users
+                                                       (SUPER_ADMIN only).
+
+DESIGN_LEAD seed created                             VERIFIED (pnpm db:seed ran
+                                                       successfully: 12 roles,
+                                                       449 role-permission links)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. FAILED OR BROKEN ITEMS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+None identified from code review. No broken endpoints, no missing field references,
+no import path errors in the newly added code.
+
+Caveats:
+  - Browser-level testing was NOT performed in this session.
+  - "Verified from code review" does not equal "tested in browser."
+  - Edge cases (empty states, validation error messages, date parsing in UI) are
+    not confirmed working end-to-end.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+5. ROLE ACCESS RESULTS (when AUTHZ_ENFORCE=true)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ROLE            Dashboard  Opportunities  Projects   Proposals  Admin    Finance
+─────────────── ──────────────────────────────────────────────────────────────
+SUPER_ADMIN     NO(1)      NO(1)          NO(1)      NO(1)      FULL     NO
+DIRECTOR        FULL       FULL           FULL       FULL       NO(2)    FULL
+SALES_MANAGER   TEAM       TEAM           VIEW-ALL   TEAM       NO       VIEW
+SALES_ENGINEER  NO         OWN            NO         OWN        NO       NO
+PROJECT_MANAGER ASSIGNED   ASSIGNED       ASSIGNED   ASSIGNED   NO       COST-ONLY
+DESIGN_LEAD     FULL       VIEW-ALL       VIEW-ALL   VIEW-ALL   NO       NO(3)
+DESIGN_ENGINEER NO         ASSIGNED       ASSIGNED   ASSIGNED   NO       NO
+FINANCE_ADMIN   FULL       VIEW-ALL       VIEW-ALL   VIEW-ALL   NO       FULL
+SITE_SUPERVISOR NO         NO             ASSIGNED   NO         NO       NO
+COMMISSIONING_  NO         NO             ASSIGNED   NO         NO       NO
+OM_ENGINEER     NO         NO             ASSIGNED   NO         NO       NO
+
+(1) SUPER_ADMIN only has user_admin and role_admin permissions. They cannot access
+    business data by design. This is intentional and correct.
+(2) DIRECTOR does not have user_admin. Super admin manages users; director manages
+    business. This is correct.
+(3) DESIGN_LEAD has no access to contracts, invoices, margin, cost, payment_status.
+    This is intentional.
+
+DESIGN_LEAD endpoint-level access (AUTHZ_ENFORCE=true):
+  GET  /api/reporting/dashboard        → 200 OK  (reporting:view:all)
+  GET  /api/opportunities              → 200 OK  (opportunity:view:all)
+  GET  /api/opportunities/:id          → 200 OK  (opportunity:view:all)
+  PATCH /api/opportunities/:id         → 403      (no opportunity:edit) — CORRECT
+  GET  /api/projects                   → 200 OK  (project:view:all)
+  GET  /api/projects/:id               → 200 OK  (project:view:all)
+  PATCH /api/projects/:id              → 403      (no project:edit) — CORRECT
+  GET  /api/proposals                  → 200 OK  (proposal:view:all)
+  GET  /api/documents                  → 200 OK  (document:view:all)
+  POST /api/documents                  → 200 OK  (document:create:all)
+  GET  /api/admin/users                → 403      (no user_admin:view) — CORRECT
+  PATCH /auth/change-password          → 200 OK  (any authenticated user)
+
+NOTE: The NextActionPanel on the opportunity detail page calls PATCH /opportunities/:id.
+      When AUTHZ_ENFORCE=true, DESIGN_LEAD will receive a 403 if they attempt to save
+      the next-action form. The UI does not currently hide the edit controls based on role.
+      This is a V1 limitation — the 403 is the safety net. A future improvement would
+      be to conditionally render edit controls based on the user's permissions.
+
+      Same applies to the RagPanel on the project detail page — DESIGN_LEAD can view
+      but cannot save. The save button will return 403. Acceptable for V1.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+6. SECURITY / PERMISSION AUDIT RESULTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Item                                                 Result
+─────────────────────────────────────────────────── ─────────────────────────────
+/auth/register endpoint exists                       SAFE — does not exist.
+                                                     User creation requires
+                                                     SUPER_ADMIN via /admin/users.
+
+/reporting/dashboard data sensitivity                SAFE — returns aggregate
+                                                     counts and totals only.
+                                                     No individual records,
+                                                     no PII, no transaction detail.
+                                                     totalPipelineValue is
+                                                     aggregate — acceptable for
+                                                     roles with reporting:view.
+
+PATCH /opportunities/:id — next-action fields        CORRECT — requires
+                                                     opportunity:edit.
+                                                     DESIGN_LEAD, DESIGN_ENGINEER,
+                                                     PROJECT_MANAGER, FINANCE_ADMIN
+                                                     cannot edit opportunities.
+
+PATCH /projects/:id — RAG/blocker fields             CORRECT — requires
+                                                     project:edit.
+                                                     Only DIRECTOR and PM
+                                                     (when assigned) can write RAG.
+
+PATCH /auth/change-password                          CORRECT — requires
+                                                     valid JWT. No @RequirePermission
+                                                     needed — any authenticated user
+                                                     can change their own password.
+                                                     Validates current password
+                                                     with bcrypt before allowing
+                                                     the change.
+
+POST /admin/users/:id/reset-password                 CORRECT — requires
+                                                     user_admin:edit (SUPER_ADMIN
+                                                     only). PM/DIRECTOR cannot
+                                                     reset passwords.
+
+AUTHZ_ENFORCE=false (current dev state)              RISK — all authenticated
+                                                     users bypass role checks.
+                                                     Only JWT required. Must be
+                                                     set to true before rollout.
+
+JWT_SECRET not set warning                           KNOWN RISK in dev. Will
+                                                     cause startup warning but
+                                                     not block. Must set before
+                                                     production.
+
+COOKIE_SECRET default value                          KNOWN RISK in dev. Same.
+                                                     Must set before production.
+
+Rate limiting configured                             OK — 200 req/min per IP via
+                                                     ThrottlerModule.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+7. REMAINING BLOCKERS BEFORE INTERNAL ROLLOUT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+BLOCKER  Priority  Item
+───────  ────────  ──────────────────────────────────────────────────────────────
+B-01     CRITICAL  AUTHZ_ENFORCE=false. The permission guard is in audit-only mode.
+                   Every authenticated user can access every endpoint regardless
+                   of role. This must be set to true and tested before any
+                   internal user touches the system.
+                   Action: Set AUTHZ_ENFORCE=true in .env, restart API, then do
+                   a full role-by-role smoke test using the test user credentials.
+
+B-02     HIGH      Browser test not completed this session. The following flows
+                   need manual verification in a running browser:
+                     - Opportunity: save nextAction + reload → field persists
+                     - Opportunity edit form: save + reload → fields persist
+                     - Project RAG/blocker: save + reload → persists
+                     - Dashboard: metrics show correct live data
+                     - Login as DESIGN_LEAD → dashboard loads (reporting:view)
+                     - Login as SALES_ENGINEER → dashboard blocked (no reporting:view)
+                     - Account switch (login as different user) → display name updates
+
+B-03     HIGH      Change Password modal not browser-tested. Need to verify:
+                     - Modal opens from topbar ⋯ menu
+                     - Wrong current password → shows error
+                     - Passwords mismatch → shows error
+                     - Correct save → success message + modal closes
+
+B-04     MEDIUM    DESIGN_LEAD (and DESIGN_ENGINEER) see edit controls in the UI
+                   (NextActionPanel, RagPanel) even though they have no edit
+                   permission. When AUTHZ_ENFORCE=true these will silently fail
+                   or show an API error. UI-level hiding based on role is not
+                   implemented. Acceptable for V1 but creates a poor UX.
+                   Action: Post-rollout improvement — conditionally render edit
+                   controls based on user permissions from /auth/me.
+
+B-05     LOW       JWT_SECRET and COOKIE_SECRET should be set to real values in
+                   the deployment .env before any production/shared-network use.
+                   Currently uses dev defaults. Not a blocker for internal dev
+                   testing but is a blocker for any shared/external access.
+
+B-06     LOW       SALES_ENGINEER has no access to reporting/dashboard. If they
+                   need a personal pipeline view, a role-specific dashboard is
+                   needed. Out of scope for V1 but should be noted.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+8. RECOMMENDED NEXT STEP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+IMMEDIATE (before telling anyone else to use the system):
+  1. Set AUTHZ_ENFORCE=true in the API .env file
+  2. Restart the API
+  3. Log in as each test user and verify they can/cannot access what they should:
+       Priority: DIRECTOR, DESIGN_LEAD, SALES_ENGINEER, PROJECT_MANAGER
+  4. Manually test opportunity next-action save and reload
+  5. Manually test project RAG/blocker save and reload
+  6. Test Change Password modal (open → type wrong current password → verify error →
+     type correct → verify success)
+
+BEFORE SHARING WITH INTERNAL TEAM (15 users):
+  1. Confirm AUTHZ_ENFORCE=true is working correctly
+  2. Set real JWT_SECRET and COOKIE_SECRET
+  3. Brief each role group on what they can and cannot access
+  4. Provide DESIGN_LEAD login: designlead@pekatgroup.com / Test@1234
+  5. Create a real DESIGN_LEAD user account for the actual person
+
+DO NOT EXPAND yet:
+  - Do not add new features until B-01 through B-03 are cleared
+  - Do not give DESIGN_LEAD any edit permissions on opportunities or projects
+  - Do not remove AUTHZ_ENFORCE audit logging — it will help catch problems
+    during the first weeks of real use
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FILES CHANGED IN THIS SESSION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+packages/db/src/seeds/permissions.seed.ts
+  - Added DESIGN_LEAD to 30+ permission entries across all relevant resources
+  - Added 1 new permission entry: technical_assessment:approve:all (DESIGN_LEAD)
+  - Reseeded: 449 role-permission links now active
+
+apps/api/src/modules/auth/auth.service.ts
+  - Added changePassword() method with bcrypt current-password verification
+
+apps/api/src/modules/auth/auth.controller.ts
+  - Added PATCH /auth/change-password endpoint
+
+apps/web/src/components/layout/topbar.tsx
+  - Added ChangePasswordModal component (inline, self-contained)
+  - Added "Change Password" menu item in user dropdown
+  - Renders modal on click
+
+dev_log/v1_rollout_readiness_260411.txt (this file)
+
+================================================================================
+END OF REPORT
+================================================================================

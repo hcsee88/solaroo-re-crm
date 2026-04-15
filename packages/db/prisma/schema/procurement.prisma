@@ -1,0 +1,202 @@
+// procurement.prisma — vendors, products, RFQs, purchase orders, deliveries, equipment serials
+
+enum PurchaseOrderStatus {
+  DRAFT
+  SUBMITTED
+  ACKNOWLEDGED
+  IN_PRODUCTION
+  DISPATCHED
+  PARTIALLY_DELIVERED
+  DELIVERED
+  CLOSED
+  CANCELLED
+}
+
+model Vendor {
+  id              String   @id @default(cuid())
+  vendorCode      String   @unique
+  name            String
+  registrationNo  String?
+  country         String?
+  region          String?
+  website         String?
+  paymentTerms    String?
+  leadTimeDays    Int?
+  rating          Int?     // 1-5
+  isApproved      Boolean  @default(false)
+  notes           String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  contacts        VendorContact[]
+  products        Product[]
+  rfqs            Rfq[]
+  quotes          VendorQuote[]
+  purchaseOrders  PurchaseOrder[]
+
+  @@map("vendors")
+}
+
+model VendorContact {
+  id         String  @id @default(cuid())
+  vendorId   String
+  name       String
+  email      String?
+  phone      String?
+  jobTitle   String?
+
+  vendor     Vendor  @relation(fields: [vendorId], references: [id])
+
+  @@map("vendor_contacts")
+}
+
+model Product {
+  id             String   @id @default(cuid())
+  productCode    String   @unique
+  name           String
+  category       String   // e.g. "Solar Panel", "Battery", "Inverter", "BMS", "Cabling"
+  vendorId       String?
+  manufacturer   String?
+  model          String?
+  specifications String?
+  unitOfMeasure  String   @default("unit")
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  vendor         Vendor?  @relation(fields: [vendorId], references: [id])
+
+  rfqLineItems   RfqLineItem[]
+  poLineItems    PoLineItem[]
+  serials        EquipmentSerial[]
+
+  @@map("products")
+}
+
+model Rfq {
+  id            String   @id @default(cuid())
+  rfqNo         String   @unique
+  projectId     String?
+  title         String
+  issuedDate    DateTime?
+  responseDate  DateTime?
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  vendorId      String
+  vendor        Vendor   @relation(fields: [vendorId], references: [id])
+
+  lineItems     RfqLineItem[]
+  quotes        VendorQuote[]
+
+  @@map("rfqs")
+}
+
+model RfqLineItem {
+  id          String   @id @default(cuid())
+  rfqId       String
+  productId   String?
+  description String
+  quantity    Decimal  @db.Decimal(12, 4)
+  unit        String?
+
+  rfq         Rfq      @relation(fields: [rfqId], references: [id])
+  product     Product? @relation(fields: [productId], references: [id])
+
+  @@map("rfq_line_items")
+}
+
+model VendorQuote {
+  id            String   @id @default(cuid())
+  rfqId         String
+  vendorId      String
+  quoteNo       String?
+  totalAmount   Decimal? @db.Decimal(15, 2)
+  currency      String   @default("MYR")
+  leadTimeDays  Int?
+  validUntil    DateTime?
+  notes         String?
+  fileUrl       String?
+  receivedAt    DateTime @default(now())
+  isSelected    Boolean  @default(false)
+
+  rfq           Rfq      @relation(fields: [rfqId], references: [id])
+  vendor        Vendor   @relation(fields: [vendorId], references: [id])
+
+  @@map("vendor_quotes")
+}
+
+model PurchaseOrder {
+  id              String              @id @default(cuid())
+  poNo            String              @unique
+  projectId       String?
+  vendorId        String
+  status          PurchaseOrderStatus @default(DRAFT)
+  issuedDate      DateTime?
+  expectedDate    DateTime?
+  totalAmount     Decimal?            @db.Decimal(15, 2)
+  currency        String              @default("MYR")
+  paymentTerms    String?
+  deliveryAddress String?
+  notes           String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  project         Project?            @relation(fields: [projectId], references: [id])
+  vendor          Vendor              @relation(fields: [vendorId], references: [id])
+
+  lineItems       PoLineItem[]
+  deliveries      Delivery[]
+
+  @@map("purchase_orders")
+}
+
+model PoLineItem {
+  id          String   @id @default(cuid())
+  poId        String
+  productId   String?
+  description String
+  quantity    Decimal  @db.Decimal(12, 4)
+  unit        String?
+  unitPrice   Decimal? @db.Decimal(15, 4)
+  totalPrice  Decimal? @db.Decimal(15, 2)
+
+  po          PurchaseOrder @relation(fields: [poId], references: [id])
+  product     Product?      @relation(fields: [productId], references: [id])
+
+  @@map("po_line_items")
+}
+
+model Delivery {
+  id              String    @id @default(cuid())
+  poId            String
+  deliveryNoteNo  String?
+  receivedDate    DateTime?
+  deliveredDate   DateTime?
+  notes           String?
+  createdAt       DateTime  @default(now())
+
+  po              PurchaseOrder @relation(fields: [poId], references: [id])
+  serials         EquipmentSerial[]
+
+  @@map("deliveries")
+}
+
+model EquipmentSerial {
+  id              String   @id @default(cuid())
+  productId       String
+  deliveryId      String?
+  serialNo        String
+  batchNo         String?
+  warrantyStart   DateTime?
+  warrantyEnd     DateTime?
+  notes           String?
+  receivedAt      DateTime @default(now())
+
+  product         Product  @relation(fields: [productId], references: [id])
+  delivery        Delivery? @relation(fields: [deliveryId], references: [id])
+  asset           Asset?
+
+  @@unique([productId, serialNo])
+  @@map("equipment_serials")
+}

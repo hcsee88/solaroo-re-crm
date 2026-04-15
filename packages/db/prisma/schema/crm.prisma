@@ -1,0 +1,237 @@
+// crm.prisma — accounts, contacts, sites, opportunities, activities, notes
+
+enum AccountType {
+  CLIENT
+  PROSPECT
+  PARTNER
+  CONSULTANT
+  VENDOR
+}
+
+enum SiteGridCategory {
+  OFF_GRID
+  WEAK_GRID
+  GRID_CONNECTED
+  HYBRID
+}
+
+enum OpportunityStage {
+  LEAD
+  QUALIFIED
+  DATA_COLLECTION
+  SITE_ASSESSMENT_PENDING
+  CONCEPT_DESIGN
+  BUDGETARY_PROPOSAL
+  FIRM_PROPOSAL
+  NEGOTIATION
+  CONTRACTING
+  WON
+  LOST
+  ON_HOLD
+}
+
+enum CommercialModel {
+  CAPEX_SALE
+  LEASE
+  PPA
+  HYBRID_CAPEX_PPA
+  EPC_ONLY
+  DESIGN_AND_SUPPLY
+}
+
+// ─── Accounts ────────────────────────────────────────────────────────────────
+
+model Account {
+  id                   String      @id @default(cuid())
+  accountCode          String      @unique
+  name                 String
+  type                 AccountType
+  industry             String?
+  registrationNo       String?
+  country              String      @default("Malaysia")
+  region               String?
+  website              String?
+  notes                String?
+  isActive             Boolean     @default(true)
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  contacts             AccountContact[]
+  sites                Site[]
+  opportunities        Opportunity[]
+  projects             Project[]
+  contracts            Contract[]
+  activities           Activity[]
+
+  @@map("accounts")
+}
+
+model Contact {
+  id            String   @id @default(cuid())
+  firstName     String
+  lastName      String
+  email         String?
+  phone         String?
+  jobTitle      String?
+  department    String?
+  notes         String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  accounts      AccountContact[]
+  activities    Activity[]
+  sitesPrimary  Site[]           @relation("SitePrimaryContact")
+
+  @@map("contacts")
+}
+
+model AccountContact {
+  accountId     String
+  contactId     String
+  isPrimary     Boolean @default(false)
+  relationship  String? // e.g. "Decision Maker", "Technical Lead", "Commercial"
+
+  account       Account @relation(fields: [accountId], references: [id])
+  contact       Contact @relation(fields: [contactId], references: [id])
+
+  @@id([accountId, contactId])
+  @@map("account_contacts")
+}
+
+// ─── Sites ────────────────────────────────────────────────────────────────────
+
+model Site {
+  id                   String           @id @default(cuid())
+  siteCode             String           @unique
+  name                 String
+  address              String?
+  latitude             Decimal?         @db.Decimal(10, 7)
+  longitude            Decimal?         @db.Decimal(10, 7)
+  gridCategory         SiteGridCategory
+  country              String           @default("Malaysia")
+  region               String?
+  operatingSchedule    String?          // e.g. "24/7", "0600-2200"
+  accessConstraints    String?
+  safetyConstraints    String?
+  notes                String?
+  isActive             Boolean          @default(true)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  accountId            String
+  account              Account          @relation(fields: [accountId], references: [id])
+
+  primaryContactId     String?
+  primaryContact       Contact?         @relation("SitePrimaryContact", fields: [primaryContactId], references: [id])
+
+  photos               SitePhoto[]
+  opportunities        Opportunity[]
+  siteSurveys          SiteSurvey[]
+  projects             Project[]
+  assets               Asset[]
+
+  @@map("sites")
+}
+
+model SitePhoto {
+  id          String   @id @default(cuid())
+  siteId      String
+  fileUrl     String
+  caption     String?
+  takenAt     DateTime?
+  uploadedAt  DateTime @default(now())
+
+  site        Site     @relation(fields: [siteId], references: [id])
+
+  @@map("site_photos")
+}
+
+// ─── Opportunities ────────────────────────────────────────────────────────────
+
+model Opportunity {
+  id                  String           @id @default(cuid())
+  opportunityCode     String           @unique
+  title               String
+  stage               OpportunityStage @default(LEAD)
+  commercialModel     CommercialModel?
+  estimatedValue      Decimal?         @db.Decimal(15, 2)
+  estimatedPvKwp      Decimal?         @db.Decimal(10, 2)
+  estimatedBessKw     Decimal?         @db.Decimal(10, 2)
+  estimatedBessKwh    Decimal?         @db.Decimal(10, 2)
+  probabilityPercent  Int?
+  expectedAwardDate   DateTime?
+  competitors         String?
+  risks               String?
+  summary             String?
+  lostReason          String?
+  // ── V1 tracking fields ──────────────────────────────────────────────────
+  nextAction          String?          // What needs to happen next (free text)
+  nextActionDueDate   DateTime?        // When next action must be done by
+  lastStatusNote      String?          // Latest brief status update from owner
+  isActive            Boolean          @default(true)
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  accountId           String
+  siteId              String
+  ownerUserId         String
+
+  account             Account          @relation(fields: [accountId], references: [id])
+  site                Site             @relation(fields: [siteId], references: [id])
+  owner               User             @relation("OpportunityOwner", fields: [ownerUserId], references: [id])
+
+  stageHistory        OpportunityStageHistory[]
+  solutionOptions     SolutionOption[]
+  proposals           Proposal[]
+  project             Project?
+  activities          Activity[]
+  documents           Document[]
+  members             OpportunityMember[]
+
+  @@map("opportunities")
+}
+
+model OpportunityStageHistory {
+  id              String           @id @default(cuid())
+  opportunityId   String
+  fromStage       OpportunityStage?
+  toStage         OpportunityStage
+  changedByUserId String?
+  reason          String?
+  changedAt       DateTime         @default(now())
+
+  opportunity     Opportunity      @relation(fields: [opportunityId], references: [id])
+
+  @@map("opportunity_stage_history")
+}
+
+// ─── Activities / Notes ───────────────────────────────────────────────────────
+
+enum ActivityType {
+  CALL
+  EMAIL
+  MEETING
+  NOTE
+  SITE_VISIT
+  TASK
+}
+
+model Activity {
+  id            String       @id @default(cuid())
+  type          ActivityType
+  subject       String
+  body          String?
+  occurredAt    DateTime
+  createdAt     DateTime     @default(now())
+
+  accountId     String?
+  contactId     String?
+  opportunityId String?
+
+  account       Account?     @relation(fields: [accountId], references: [id])
+  contact       Contact?     @relation(fields: [contactId], references: [id])
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
+
+  @@map("activities")
+}

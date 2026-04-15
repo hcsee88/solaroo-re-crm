@@ -1,0 +1,10 @@
+{
+  "name": "@solaroo/config",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "zod": "^3.23.0"
+  }
+}

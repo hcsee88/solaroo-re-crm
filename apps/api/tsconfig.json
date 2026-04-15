@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "outDir": "./dist",
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "strict": true,
+    "strictPropertyInitialization": false,
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false,
+    "noImplicitOverride": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@solaroo/db": ["../../packages/db/src/index.ts"],
+      "@solaroo/types": ["../../packages/types/src/index.ts"],
+      "@solaroo/workflows": ["../../packages/workflows/src/index.ts"],
+      "@solaroo/ai-prompts": ["../../packages/ai-prompts/src/index.ts"],
+      "@prisma/client": ["../../packages/db/node_modules/.prisma/client", "../../node_modules/.prisma/client", "../../node_modules/@prisma/client"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "../../packages/db/src/**/*.ts",
+    "../../packages/types/src/**/*.ts",
+    "../../packages/workflows/src/**/*.ts",
+    "../../packages/ai-prompts/src/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist", "test"]
+}

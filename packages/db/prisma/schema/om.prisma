@@ -1,0 +1,168 @@
+// om.prisma — assets, maintenance plans, service tickets, warranty claims, spare parts
+
+enum AssetStatus {
+  OPERATIONAL
+  DEGRADED
+  FAULTED
+  DECOMMISSIONED
+  UNDER_MAINTENANCE
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  PENDING_PARTS
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model Asset {
+  id                  String      @id @default(cuid())
+  assetTag            String      @unique
+  assetType           String      // e.g. "Solar Panel", "Battery System", "Inverter/PCS", "Genset"
+  projectId           String?
+  siteId              String
+  manufacturer        String?
+  model               String?
+  serialId            String?     @unique  // links to EquipmentSerial
+  capacityKw          Decimal?    @db.Decimal(10, 2)
+  capacityKwh         Decimal?    @db.Decimal(10, 2)
+  capacityKwp         Decimal?    @db.Decimal(10, 2)
+  commissioningDate   DateTime?
+  warrantyStart       DateTime?
+  warrantyEnd         DateTime?
+  status              AssetStatus @default(OPERATIONAL)
+  notes               String?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  project             Project?            @relation(fields: [projectId], references: [id])
+  site                Site                @relation(fields: [siteId], references: [id])
+  serial              EquipmentSerial?    @relation(fields: [serialId], references: [id])
+
+  maintenancePlans    MaintenancePlan[]
+  maintenanceRecords  MaintenanceRecord[]
+  serviceTickets      ServiceTicket[]
+  warrantyClaims      WarrantyClaim[]
+  performanceLogs     PerformanceLog[]
+
+  @@map("assets")
+}
+
+model MaintenancePlan {
+  id              String   @id @default(cuid())
+  assetId         String
+  title           String
+  description     String?
+  frequencyDays   Int      // e.g. 90 for quarterly, 365 for annual
+  lastPerformedAt DateTime?
+  nextDueAt       DateTime?
+  assignedTo      String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  asset           Asset              @relation(fields: [assetId], references: [id])
+  records         MaintenanceRecord[]
+
+  @@map("maintenance_plans")
+}
+
+model MaintenanceRecord {
+  id            String    @id @default(cuid())
+  assetId       String
+  planId        String?
+  performedDate DateTime
+  performedBy   String?
+  description   String?
+  findings      String?
+  nextDueAt     DateTime?
+  fileUrl       String?
+  createdAt     DateTime  @default(now())
+
+  asset         Asset            @relation(fields: [assetId], references: [id])
+  plan          MaintenancePlan? @relation(fields: [planId], references: [id])
+
+  @@map("maintenance_records")
+}
+
+model ServiceTicket {
+  id              String         @id @default(cuid())
+  ticketNo        String         @unique
+  assetId         String
+  siteId          String?
+  title           String
+  description     String?
+  priority        TicketPriority @default(MEDIUM)
+  status          TicketStatus   @default(OPEN)
+  reportedDate    DateTime       @default(now())
+  resolvedDate    DateTime?
+  closedDate      DateTime?
+  reportedBy      String?
+  assignedTo      String?
+  resolution      String?
+  rootCause       String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  asset           Asset          @relation(fields: [assetId], references: [id])
+
+  @@map("service_tickets")
+}
+
+model WarrantyClaim {
+  id              String    @id @default(cuid())
+  claimNo         String    @unique
+  assetId         String
+  claimDate       DateTime  @default(now())
+  description     String
+  claimStatus     String    @default("OPEN") // OPEN, SUBMITTED, ACCEPTED, REJECTED, RESOLVED
+  submittedToVendor DateTime?
+  vendorRefNo     String?
+  resolution      String?
+  resolvedDate    DateTime?
+  notes           String?
+  createdAt       DateTime  @default(now())
+
+  asset           Asset     @relation(fields: [assetId], references: [id])
+
+  @@map("warranty_claims")
+}
+
+model SparePart {
+  id            String   @id @default(cuid())
+  siteId        String?
+  productCode   String?
+  name          String
+  description   String?
+  quantity      Int      @default(0)
+  unit          String   @default("unit")
+  location      String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("spare_parts")
+}
+
+model PerformanceLog {
+  id              String   @id @default(cuid())
+  assetId         String
+  logDate         DateTime
+  energyKwh       Decimal? @db.Decimal(12, 3)
+  peakKw          Decimal? @db.Decimal(10, 2)
+  stateOfChargePercent Decimal? @db.Decimal(5, 2)
+  availabilityPercent  Decimal? @db.Decimal(5, 2)
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  asset           Asset    @relation(fields: [assetId], references: [id])
+
+  @@map("performance_logs")
+}

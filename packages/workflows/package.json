@@ -1,0 +1,13 @@
+{
+  "name": "@solaroo/workflows",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "dependencies": {
+    "@solaroo/db": "workspace:*",
+    "@solaroo/types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

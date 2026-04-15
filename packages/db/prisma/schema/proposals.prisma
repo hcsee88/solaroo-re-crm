@@ -1,0 +1,164 @@
+// proposals.prisma — proposals, proposal_versions, assumptions, approvals, site surveys, solution options
+
+enum ProposalApprovalStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  SUPERSEDED
+}
+
+enum ApprovalDecision {
+  APPROVED
+  REJECTED
+  RETURNED
+}
+
+// ─── Technical Assessment ────────────────────────────────────────────────────
+
+model SiteSurvey {
+  id                       String   @id @default(cuid())
+  siteId                   String
+  opportunityId            String?
+  surveyDate               DateTime?
+  conductedByUserId        String?
+  dailyEnergyKwh           Decimal? @db.Decimal(10, 2)
+  peakDemandKw             Decimal? @db.Decimal(10, 2)
+  criticalLoadList         String?
+  generatorDutyCycle       String?
+  fuelConsumptionLPerDay   Decimal? @db.Decimal(10, 2)
+  distributionTopology     String?
+  earthingStatus           String?
+  spaceAvailabilitySqm     Decimal? @db.Decimal(10, 2)
+  fireSafetyObservations   String?
+  interfacingRequirements  String?
+  technicalRisks           String?
+  dataCompletenessScore    Int?     // 0-100
+  surveyNotes              String?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  site          Site          @relation(fields: [siteId], references: [id])
+
+  @@map("site_surveys")
+}
+
+model LoadProfile {
+  id              String   @id @default(cuid())
+  opportunityId   String
+  sourceType      String   // e.g. "meter_data", "estimate", "genset_log"
+  intervalMinutes Int      @default(60)
+  dataStartAt     DateTime
+  dataEndAt       DateTime
+  fileUrl         String?
+  notes           String?
+  uploadedAt      DateTime @default(now())
+
+  @@map("load_profiles")
+}
+
+// ─── Solution Options ─────────────────────────────────────────────────────────
+
+model SolutionOption {
+  id              String   @id @default(cuid())
+  opportunityId   String
+  title           String   // e.g. "Option A: Solar + BESS", "Option B: Full Off-grid"
+  pvSizeKwp       Decimal? @db.Decimal(10, 2)
+  bessKw          Decimal? @db.Decimal(10, 2)
+  bessKwh         Decimal? @db.Decimal(10, 2)
+  generatorKw     Decimal? @db.Decimal(10, 2)
+  description     String?
+  isSelected      Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  opportunity     Opportunity @relation(fields: [opportunityId], references: [id])
+
+  proposals       Proposal[]
+
+  @@map("solution_options")
+}
+
+// ─── Proposals ────────────────────────────────────────────────────────────────
+
+model Proposal {
+  id              String   @id @default(cuid())
+  proposalCode    String   @unique
+  opportunityId   String
+  solutionId      String?
+  title           String
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  opportunity     Opportunity    @relation(fields: [opportunityId], references: [id])
+  solution        SolutionOption? @relation(fields: [solutionId], references: [id])
+
+  versions        ProposalVersion[]
+
+  @@map("proposals")
+}
+
+model ProposalVersion {
+  id                  String                 @id @default(cuid())
+  proposalId          String
+  versionNo           Int
+  title               String
+  approvalStatus      ProposalApprovalStatus @default(DRAFT)
+  technicalSummary    String?
+  commercialSummary   String?
+  estimatedCapex      Decimal?               @db.Decimal(15, 2)
+  estimatedMargin     Decimal?               @db.Decimal(15, 2)
+  marginPercent       Decimal?               @db.Decimal(5, 2)
+  estimatedSavings    Decimal?               @db.Decimal(15, 2)
+  paybackYears        Decimal?               @db.Decimal(5, 2)
+  issuedToClientAt    DateTime?
+  submittedForApprovalAt DateTime?
+  approvedAt          DateTime?
+  createdByUserId     String?
+  createdAt           DateTime               @default(now())
+
+  proposal            Proposal               @relation(fields: [proposalId], references: [id])
+  assumptions         ProposalAssumptionSet?
+  approvals           ProposalApproval[]
+  documents           Document[]
+
+  @@unique([proposalId, versionNo])
+  @@map("proposal_versions")
+}
+
+model ProposalAssumptionSet {
+  id                      String   @id @default(cuid())
+  proposalVersionId       String   @unique
+  loadSourceDescription   String?
+  dieselPricePerLiter     Decimal? @db.Decimal(8, 4)
+  batteryUsableDodPercent Decimal? @db.Decimal(5, 2)
+  batteryRtEfficiency     Decimal? @db.Decimal(5, 2)
+  pcsPowerLimitKw         Decimal? @db.Decimal(10, 2)
+  pvYieldKwhPerKwp        Decimal? @db.Decimal(8, 2)
+  omAssumption            String?
+  targetSavingsStrategy   String?
+  otherAssumptions        String?
+  frozenAt                DateTime?
+  createdAt               DateTime @default(now())
+
+  proposalVersion         ProposalVersion @relation(fields: [proposalVersionId], references: [id])
+
+  @@map("proposal_assumption_sets")
+}
+
+model ProposalApproval {
+  id                  String           @id @default(cuid())
+  proposalVersionId   String
+  approverUserId      String
+  approvalOrder       Int              // 1, 2, 3 for sequential approval
+  decision            ApprovalDecision?
+  comments            String?
+  decidedAt           DateTime?
+  requestedAt         DateTime         @default(now())
+
+  proposalVersion     ProposalVersion  @relation(fields: [proposalVersionId], references: [id])
+  approver            User             @relation("Approver", fields: [approverUserId], references: [id])
+
+  @@map("proposal_approvals")
+}

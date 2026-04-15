@@ -1,0 +1,111 @@
+// contracts.prisma — contracts, milestones, invoices, budgets, cost tracking
+
+enum ContractStatus {
+  DRAFT
+  UNDER_REVIEW
+  SIGNED
+  ACTIVE
+  CLOSED
+  DISPUTED
+  TERMINATED
+}
+
+enum InvoiceStatus {
+  NOT_RAISED
+  RAISED
+  SUBMITTED
+  PARTIALLY_PAID
+  PAID
+  DISPUTED
+}
+
+model Contract {
+  id              String         @id @default(cuid())
+  contractNo      String         @unique
+  opportunityId   String?
+  accountId       String
+  title           String
+  status          ContractStatus @default(DRAFT)
+  scopeSummary    String?
+  paymentTerms    String?
+  retentionPercent Decimal?      @db.Decimal(5, 2)
+  contractValue   Decimal        @db.Decimal(15, 2)
+  currency        String         @default("MYR")
+  signedDate      DateTime?
+  commencementDate DateTime?
+  completionDate  DateTime?
+  defectsLiabilityMonths Int?
+  notes           String?
+  fileUrl         String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  account         Account        @relation(fields: [accountId], references: [id])
+  project         Project?
+  milestones      ContractMilestone[]
+  invoices        Invoice[]
+  budgets         Budget[]
+
+  @@map("contracts")
+}
+
+model ContractMilestone {
+  id              String        @id @default(cuid())
+  contractId      String
+  milestoneNo     Int
+  title           String
+  description     String?
+  percentValue    Decimal?      @db.Decimal(5, 2)
+  amount          Decimal?      @db.Decimal(15, 2)
+  triggerCondition String?
+  targetDate      DateTime?
+  achievedDate    DateTime?
+  invoiceId       String?
+  isAchieved      Boolean       @default(false)
+
+  contract        Contract      @relation(fields: [contractId], references: [id])
+
+  @@map("contract_milestones")
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  invoiceNo       String        @unique
+  contractId      String
+  milestoneId     String?
+  amount          Decimal       @db.Decimal(15, 2)
+  taxAmount       Decimal?      @db.Decimal(15, 2)
+  totalAmount     Decimal       @db.Decimal(15, 2)
+  currency        String        @default("MYR")
+  status          InvoiceStatus @default(NOT_RAISED)
+  invoiceDate     DateTime?
+  dueDate         DateTime?
+  paidDate        DateTime?
+  paidAmount      Decimal?      @db.Decimal(15, 2)
+  notes           String?
+  createdAt       DateTime      @default(now())
+
+  contract        Contract      @relation(fields: [contractId], references: [id])
+
+  @@map("invoices")
+}
+
+model Budget {
+  id              String   @id @default(cuid())
+  contractId      String?
+  projectId       String?
+  category        String   // e.g. "Equipment", "Civil", "Labour", "Commissioning", "Others"
+  description     String?
+  budgetedAmount  Decimal  @db.Decimal(15, 2)
+  committedAmount Decimal? @db.Decimal(15, 2)
+  actualAmount    Decimal? @db.Decimal(15, 2)
+  currency        String   @default("MYR")
+  version         Int      @default(1)
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  contract        Contract? @relation(fields: [contractId], references: [id])
+
+  @@map("budgets")
+}

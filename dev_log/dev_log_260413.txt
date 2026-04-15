@@ -1,0 +1,134 @@
+DEV LOG — 2026-04-13
+Solaroo RE CRM
+==============================================================================
+
+SESSION SUMMARY
+---------------
+Two distinct work streams completed today:
+1. Post-PMO hardening steps from previous session (403 handling, permissions fix)
+2. Role-based UI visibility and sensitive data presentation control (V1)
+
+Also produced: crm_progress_summary_for_chatgpt_130426.txt for external architecture review.
+
+==============================================================================
+
+PART 1 — POST-PMO HARDENING
+----------------------------
+
+AUTHZ_ENFORCE=true
+- Set AUTHZ_ENFORCE=true in apps/api/.env
+- Restarted API. PermissionGuard now hard-blocks (returns 403) instead of audit-only.
+
+Issue: 6 operational roles got "Access Denied" on login
+- Affected: salesengineer, designengineer, procurement, sitesupervisor, commissioneng, omengineer
+- Root cause: dashboard calls GET /reporting/dashboard — these roles were missing reporting:view permission
+- Fix: Added reporting:view:assigned to all 6 roles in packages/db/src/seeds/permissions.seed.ts
+- Re-ran pnpm db:seed to apply
+
+Issue: 403 responses showed a blank page
+- Root cause: api-client.ts only handled 401 (redirect to /login). 403 was an unhandled rejection with no UI.
+- Fix: Added 403 handler in api-client interceptor → window.location.href = "/forbidden"
+- Created apps/web/src/app/forbidden/page.tsx — static server component with lock icon, explanation, nav buttons
+- Updated apps/web/src/middleware.ts to add "/forbidden" to PUBLIC_PATHS (no auth required to view it)
+
+
+==============================================================================
+
+PART 2 — ROLE-BASED UI VISIBILITY (V1)
+---------------------------------------
+
+Design principle: permission to access an endpoint ≠ permission to show every field or module.
+Default posture: show less, not more.
+
+Central config created: apps/web/src/lib/role-ui.ts
+- Single source of truth for all role-UI rules
+- Defines RoleName and NavHref union types
+- NAV_BY_ROLE: ordered nav item list per role
+- Visibility Sets for commercial fields (proposal CAPEX, margin, opportunity value, pipeline figures)
+- All exported as pure boolean functions: canSeeProposalCapex(), canSeeProposalMargin(), etc.
+
+Hook added: useRoleName() in apps/web/src/hooks/use-current-user.ts
+- Returns current user's role name string
+- Used as the single input to all role-ui functions
+
+FILES CHANGED
+-------------
+
+apps/web/src/lib/role-ui.ts
+  CREATED. All role-UI rules centralized here.
+
+apps/web/src/hooks/use-current-user.ts
+  MODIFIED. Added useRoleName() hook.
+
+apps/web/src/components/layout/sidebar.tsx
+  REWRITTEN. Role-filtered nav using getNavItemsForRole(). ALL_NAV_ITEMS is the single
+  definition. NAV_MAP provides O(1) lookup. visibleNavItems filters to role-appropriate items only.
+
+apps/web/src/app/(app)/proposals/page.tsx
+  REWRITTEN. CAPEX and Margin columns conditional on canSeeProposalCapex() / canSeeProposalMargin().
+  colCount drives skeleton column count and empty state colSpan.
+  Visible to: DIRECTOR, SALES_MANAGER, FINANCE_ADMIN only.
+
+apps/web/src/app/(app)/opportunities/page.tsx
+  MODIFIED. Value (RM) column conditional on canSeeOpportunityValue().
+  Visible to: DIRECTOR, SALES_MANAGER, SALES_ENGINEER, FINANCE_ADMIN.
+  Hidden from: PROJECT_MANAGER, DESIGN_ENGINEER, PROCUREMENT, SITE_SUPERVISOR, COMMISSIONING_ENGINEER, OM_ENGINEER.
+
+apps/web/src/app/(app)/dashboard/page.tsx
+  MODIFIED. Section visibility by role:
+  - Pipeline Health: DIRECTOR, SALES_MANAGER, SALES_ENGINEER
+  - Pipeline Value figure: DIRECTOR, SALES_MANAGER only
+  - Stage breakdown value column: DIRECTOR, SALES_MANAGER only
+  - Proposal Status: DIRECTOR, SALES_MANAGER, SALES_ENGINEER, DESIGN_LEAD, FINANCE_ADMIN
+  - Project Health: all roles
+  - Quick counts: conditional per role relevance
+  Execution roles see a focused dashboard: active projects + project health only.
+
+docs/role-based-ui-v1.md
+  CREATED. Direction document. Source of truth reference for future contributors.
+
+==============================================================================
+
+SIDEBAR RULES SUMMARY
+----------------------
+
+SUPER_ADMIN         : User Management only
+DIRECTOR            : Dashboard · Opportunities · Proposals · Projects · PMO · Documents · Reports
+PMO_MANAGER         : Dashboard · Projects · PMO · Documents · Reports
+SALES_MANAGER       : Dashboard · Accounts · Contacts · Sites · Opportunities · Proposals · Documents · Reports
+SALES_ENGINEER      : Dashboard · Accounts · Contacts · Sites · Opportunities · Proposals · Documents
+PROJECT_MANAGER     : Dashboard · Projects · PMO · Documents · Reports
+DESIGN_LEAD         : Dashboard · Opportunities · Proposals · Projects · Documents · PMO · Reports
+DESIGN_ENGINEER     : Dashboard · Opportunities · Projects · Documents
+PROCUREMENT         : Dashboard · Projects · Procurement · Documents
+SITE_SUPERVISOR     : Dashboard · Projects · Documents · O&M
+COMMISSIONING_ENGINEER : Dashboard · Projects · Documents · O&M
+OM_ENGINEER         : Dashboard · O&M · Projects · Documents
+FINANCE_ADMIN       : Dashboard · Reports · Projects · Documents
+
+==============================================================================
+
+OPEN ITEMS / V2 CANDIDATES
+---------------------------
+
+B-03: Scope enforcement — service layer filtering not yet validated
+B-04: Sensitive field stripping — API response field stripping not yet confirmed
+      (UI hides fields but backend may still return them on detail endpoints)
+
+V2 UI candidates:
+- Detail page field-level hiding (margin in proposal detail, cost in project detail)
+- Role-appropriate empty states
+- Action button hiding by role (e.g. hide "New Proposal" for Design Engineer)
+- Role-specific dashboard widgets (maintenance tickets for O&M)
+- Mobile-optimized views for Site Supervisor and Commissioning Engineer
+
+==============================================================================
+
+EXTERNAL SUMMARY FILE
+---------------------
+dev_log/crm_progress_summary_for_chatgpt_130426.txt
+- 11-section comprehensive status for ChatGPT architecture review
+- Covers all modules, roles, permissions, security posture, verified vs unverified items
+
+==============================================================================
+END OF LOG

@@ -1,0 +1,95 @@
+// documents.prisma — documents, revisions, approvals, transmittals
+
+enum DocumentStatus {
+  DRAFT
+  UNDER_REVIEW
+  APPROVED
+  SUPERSEDED
+  OBSOLETE
+}
+
+enum DocumentApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  RETURNED
+}
+
+model Document {
+  id                  String         @id @default(cuid())
+  docCode             String
+  title               String
+  docType             String         // e.g. "Drawing", "Survey Report", "Design Basis", "Contract", "As-Built"
+  module              String?        // e.g. "proposal", "project", "om"
+  currentRevision     String?
+  status              DocumentStatus @default(DRAFT)
+  linkedGateNo        Int?
+  notes               String?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  ownerUserId         String?
+  projectId           String?
+  opportunityId       String?
+  proposalVersionId   String?
+  deliverableId       String?           // links doc to a specific gate deliverable
+
+  owner               User?             @relation("DocumentOwner", fields: [ownerUserId], references: [id])
+  project             Project?          @relation(fields: [projectId], references: [id])
+  opportunity         Opportunity?      @relation(fields: [opportunityId], references: [id])
+  proposalVersion     ProposalVersion?  @relation(fields: [proposalVersionId], references: [id])
+  deliverable         GateDeliverable?  @relation(fields: [deliverableId], references: [id])
+
+  revisions           DocumentRevision[]
+  transmittalItems    TransmittalItem[]
+
+  @@unique([docCode, projectId])
+  @@map("documents")
+}
+
+model DocumentRevision {
+  id              String                 @id @default(cuid())
+  documentId      String
+  revision        String                 // e.g. "A", "B", "C", "1", "2"
+  description     String?
+  fileUrl         String
+  fileSizeBytes   Int?
+  mimeType        String?
+  approvalStatus  DocumentApprovalStatus @default(PENDING)
+  uploadedByUserId String?
+  approvedByUserId String?
+  approvedAt      DateTime?
+  uploadedAt      DateTime               @default(now())
+
+  document        Document               @relation(fields: [documentId], references: [id])
+
+  @@unique([documentId, revision])
+  @@map("document_revisions")
+}
+
+model Transmittal {
+  id              String    @id @default(cuid())
+  transmittalNo   String    @unique
+  projectId       String?
+  subject         String
+  sentTo          String    // name/email of recipient
+  sentDate        DateTime  @default(now())
+  purpose         String?   // "For Approval", "For Information", "For Construction"
+  notes           String?
+
+  items           TransmittalItem[]
+
+  @@map("transmittals")
+}
+
+model TransmittalItem {
+  id              String      @id @default(cuid())
+  transmittalId   String
+  documentId      String
+  revision        String?
+
+  transmittal     Transmittal @relation(fields: [transmittalId], references: [id])
+  document        Document    @relation(fields: [documentId], references: [id])
+
+  @@map("transmittal_items")
+}

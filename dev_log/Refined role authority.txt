@@ -1,0 +1,12 @@
+Refined role authority
+Role	Primary Domain	Key Constraints
+Director	Everything	Broad read + all approvals + margin actual. All sensitive actions audited.
+Sales Manager	CRM pipeline	Team-scoped edit on opps/proposals. Estimated margin only (team). Can approve proposals. No project finance.
+Sales Engineer	Own pipeline	Own-scoped create/edit on opps, assessments, proposal drafts. Submit but not approve. Estimated margin own only.
+Project Manager	Assigned projects	Full edit on assigned project scope. Gate closure submit (not approve). No commercial margin or finance.
+Design Engineer	Technical docs	Create/edit/submit on tech assessments, DBD, drawings. Read-only on commercial.
+Procurement	Vendors/POs	Full PO workflow but approve_po requires separate permission (Director or delegated).
+Site Supervisor	Field execution	Create/edit site logs, checklists, punch lists on assigned projects. No commercial.
+Commissioning Engineer	Handover/assets	Create/edit testing sheets, handover docs, asset register. Submit for approval.
+O&M Engineer	Assets/maintenance	Full edit on maintenance/tickets/warranty. Read-only on project history and handover docs.
+Finance Admin	Contracts/finance	View/edit contracts, invoices, payment status. View actual margin. User list view only.

@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ── Monday.com-inspired design tokens ────────────────────────── */
+
+    /* Page background — light blue-gray workspace feel */
+    --background: 228 33% 97%;
+    --foreground: 240 4% 20%;
+
+    /* Cards — pure white lifted off the page */
+    --card: 0 0% 100%;
+    --card-foreground: 240 4% 20%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 4% 20%;
+
+    /* Primary — Monday blue #0073EA */
+    --primary: 213 100% 46%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary — light blue tint */
+    --secondary: 213 100% 95%;
+    --secondary-foreground: 213 100% 35%;
+
+    /* Muted surfaces */
+    --muted: 220 20% 95%;
+    --muted-foreground: 237 7% 47%;
+
+    /* Accent hover — light blue wash */
+    --accent: 213 100% 95%;
+    --accent-foreground: 213 100% 32%;
+
+    /* Destructive — Monday red #E2445C */
+    --destructive: 349 73% 57%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Borders — subtle #E6E9EF */
+    --border: 218 23% 91%;
+    --input: 218 23% 91%;
+    --ring: 213 100% 46%;
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 240 6% 10%;
+    --foreground: 0 0% 98%;
+    --card: 240 5% 14%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 5% 14%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 213 100% 56%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 5% 20%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 5% 20%;
+    --muted-foreground: 240 5% 65%;
+    --accent: 240 5% 20%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 349 73% 57%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5% 22%;
+    --input: 240 5% 22%;
+    --ring: 213 100% 56%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* ── Monday.com-style thin scrollbar ────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(218 23% 82%);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(218 23% 68%);
+}

@@ -1,0 +1,976 @@
+==================================================
+PROJECT STATUS AUDIT — Solaroo RE CRM
+Generated: 2026-04-11
+Company:   Pekat Teknologi Sdn Bhd (internal use only)
+==================================================
+
+HOW TO READ THIS FILE
+----------------------
+This audit is written so that both a non-technical project owner AND a software
+architect can use it. Sections 1-3 give context. Sections 4-6 are the most
+important for security and architecture review. Section 9 lists all known gaps.
+
+Labels used:
+  [DONE]        Feature is fully implemented
+  [PARTIAL]     Feature is partly built — works but not complete
+  [STUB]        Folder/file exists but almost no logic inside
+  [MISSING]     Does not exist yet at all
+  [RISK]        Something that could cause a security or data problem
+  [INFERENCE]   Reasoned from surrounding code, not directly confirmed
+  [UNCONFIRMED] Cannot be verified from code inspection alone
+
+
+==================================================
+1. PROJECT OVERVIEW
+==================================================
+
+What This System Is:
+  A full-lifecycle CRM for an engineering company that builds off-grid solar,
+  hybrid solar-diesel, and battery energy storage (BESS) projects. It tracks
+  the entire business cycle from initial lead to long-term maintenance.
+
+  Lifecycle covered:
+  Customer Lead -> Site Assessment -> Technical Study -> Proposal (with approvals)
+  -> Contract Signing -> Project Execution (6 formal gates) -> Commissioning
+  -> Asset Handover -> Operations & Maintenance (O&M)
+
+  This is NOT a public product. It is an internal tool for ~15-30 staff.
+
+Tech Stack Summary:
+  Backend:  NestJS 10 (Node.js framework) running on Fastify, TypeScript
+  Frontend: Next.js 14 (React 18), TypeScript, Tailwind CSS
+  Database: PostgreSQL with Prisma ORM
+  Auth:     JWT tokens stored as secure httpOnly cookies
+  Queue:    BullMQ + Redis (for background jobs — currently not yet active)
+  Storage:  Local disk now, AWS S3 SDK is already installed for production
+  AI:       Anthropic Claude API already integrated in backend
+  Email:    Resend SDK installed
+  Monorepo: Turborepo (pnpm workspaces) — backend, frontend, and shared packages
+
+
+==================================================
+2. REPOSITORY STRUCTURE
+==================================================
+
+/apps/api/              - NestJS backend (runs on port 4000)
+/apps/web/              - Next.js frontend (runs on port 3000)
+
+/packages/db/           - Database: Prisma schema, migrations, seed data
+/packages/types/        - Shared TypeScript types (used by both frontend + backend)
+/packages/workflows/    - Business rules: opportunity stages, gate templates
+/packages/ai-prompts/   - Claude AI prompt templates
+/packages/ui/           - Shared UI components [STUB — barely started]
+/packages/config/       - Shared config utilities [STUB]
+/packages/documents/    - Document utilities [STUB]
+
+/services/worker/       - BullMQ background job worker [STUB — not yet functional]
+/infrastructure/        - Docker + Terraform infrastructure files
+
+Key Config Files:
+  /turbo.json           - Build pipeline orchestration
+  /package.json         - Monorepo root (Node >=20, pnpm >=9)
+  /tsconfig.base.json   - TypeScript strict mode (ES2022)
+  /.env                 - Active environment variables [NOT READABLE]
+  /.env.example         - Template for environment setup [NOT READABLE]
+
+
+==================================================
+3. CURRENTLY IMPLEMENTED FEATURES
+==================================================
+
+Below is every major feature, its current state, and what is built so far.
+
+FEATURE                    STATUS      NOTES
+-----------------------------------------------------------------
+User login / sessions      [DONE]      JWT + secure cookie, bcrypt passwords
+User management (Admin)    [DONE]      Create, edit, deactivate users (Admin only)
+Role & permission setup    [DONE]      11 roles, 50+ permissions, fully seeded
+Accounts (clients)         [DONE]      Full CRUD, filter, search, pagination
+Contacts                   [DONE]      Full CRUD, linked to accounts
+Sites                      [DONE]      Full CRUD with grid category, GPS coords
+Opportunities (pipeline)   [DONE]      12 stages, transition rules, stage history
+  -> File upload per opp   [DONE]      6 folder categories auto-created per opp
+  -> WON -> auto project   [DONE]      Project created automatically when WON
+Proposals                  [DONE]      Multi-version, 2-step approval chain
+  -> Version immutability  [DONE]      Approved versions locked; new version needed
+  -> Approval decisions    [DONE]      Approve / Reject / Return (with comments)
+Projects                   [DONE]      6-gate lifecycle, tasks, milestones
+  -> Gate tracker          [DONE]      Structured deliverable checklists (G1-G6)
+  -> Issues & Risks        [DONE]      DB modeled, backend ready
+Contracts                  [DONE]      Contract, invoices, budgets — backend ready
+Procurement                [DONE]      Vendors, RFQs, POs, deliveries — backend ready
+Documents                  [DONE]      Upload, versioning, approval, transmittals
+Assets (equipment)         [DONE]      Asset register — backend ready
+Maintenance / O&M          [DONE]      Tickets, warranty — backend ready
+Reporting                  [PARTIAL]   Backend exists; dashboard UI may be sparse
+Notifications              [PARTIAL]   Backend exists; emails not yet delivered
+AI Copilot                 [PARTIAL]   Claude API integrated; no dedicated UI found
+Technical Assessment       [STUB]      DB model exists, no backend service yet
+Background Jobs (Worker)   [STUB]      BullMQ infrastructure wired, no jobs running
+
+Frontend Pages Built:
+  /login                   [DONE]
+  /dashboard               [PARTIAL]
+  /accounts + detail/edit  [DONE]
+  /contacts + detail/edit  [DONE]
+  /sites + detail/edit     [DONE]
+  /opportunities + detail  [DONE]
+  /proposals + detail      [DONE]
+  /projects + detail       [DONE]
+  /documents               [PARTIAL]
+  /admin/users             [DONE]
+  /om (O&M)                [STUB]   — placeholder page only
+  /contracts               [MISSING]
+  /procurement             [MISSING]
+  /assets                  [MISSING]
+  /maintenance             [MISSING]
+  /reports                 [MISSING]
+  /ai                      [MISSING]
+
+
+==================================================
+4. AUTHENTICATION AND AUTHORIZATION STATUS
+==================================================
+
+--- 4A. HOW LOGIN WORKS ---
+
+When a user logs in (POST /auth/login):
+  1. Backend checks email + password (bcrypt comparison)
+  2. If valid, a JWT token is generated and stored in an httpOnly cookie
+  3. The browser automatically sends this cookie on every subsequent request
+  4. All API requests are protected — no cookie = 401 Unauthorized
+  5. GET /auth/me returns the logged-in user's profile
+
+The JWT contains: user ID, email, name, role ID, role name.
+JWT expiry: set by JWT_EXPIRES_IN env var (default: "8 hours").
+
+--- 4B. TWO GLOBAL SECURITY LAYERS ---
+
+Every API request passes through two global guards in this order:
+
+  GUARD 1: JwtAuthGuard
+    - Checks if a valid JWT cookie is present
+    - If not: returns 401 Unauthorized immediately
+    - Can be bypassed with @Public() decorator (used only for /auth/login)
+    - STATUS: [DONE] — Working correctly
+
+  GUARD 2: PermissionGuard
+    - Checks if the user's role has permission for the specific action
+    - Reads @RequirePermission('resource', 'action') on each route
+    - STATUS: [RISK] — See critical note below
+
+  CRITICAL RISK — AUTHZ_ENFORCE env variable:
+    The PermissionGuard has a mode switch controlled by an environment variable
+    named AUTHZ_ENFORCE:
+
+    If AUTHZ_ENFORCE = "true":  Permission denied = request is BLOCKED (correct)
+    If AUTHZ_ENFORCE is missing or false: Permission guard only LOGS a warning
+    but DOES NOT BLOCK the request. Any logged-in user can access any endpoint.
+
+    [RISK] If AUTHZ_ENFORCE is not set to "true" in the production server,
+    every authenticated user (even a Site Supervisor) can access contracts,
+    proposals, admin user lists, etc. This must be confirmed and fixed
+    before any real users access the system.
+
+--- 4C. WHAT EACH GUARD DOES AND DOES NOT PROTECT ---
+
+JwtAuthGuard protects:     ALL routes (unauthenticated users are always blocked)
+PermissionGuard protects:  Routes that have @RequirePermission decorator AND
+                           AUTHZ_ENFORCE=true is set in the server environment.
+
+[RISK] Not all controller routes have @RequirePermission decorators. Some
+newer/simpler endpoints may have been written without them during rapid
+development. These are open to any authenticated user regardless of role.
+
+--- 4D. SENSITIVE FIELD PROTECTION ---
+
+Some fields are additionally protected at the data level (not just route level):
+  - marginPercent, estimatedMargin  -> only Director and Sales Manager can see
+  - contractValue                   -> only Director and Finance Admin can see
+  - paymentStatus                   -> only Director and Finance Admin can see
+
+These are stripped from API responses by the AuthzService.stripSensitiveFields()
+method. [RISK] This method must be explicitly called in each service. It is not
+automatic. If a service returns a raw DB object without calling this method,
+sensitive financial data may leak to unauthorized users.
+
+--- 4E. OPEN REGISTRATION RISK ---
+
+[RISK] The endpoint POST /auth/register exists. It is unclear whether it is:
+  a) Restricted to SUPER_ADMIN only (safe)
+  b) Unrestricted and accessible to anyone (very dangerous)
+
+If (b), anyone with access to the network can create accounts with any role.
+This must be verified and locked down immediately.
+
+--- 4F. OTHER AUTH GAPS ---
+
+[RISK] Default COOKIE_SECRET value is "change-this-secret" in the code.
+  If this is not overridden in the production .env file, session cookies can
+  be forged by anyone who knows the default. Must be set to a random string.
+
+[RISK] No rate limiting specific to the login endpoint. The global rate limit
+  (200 requests/minute) applies to all routes equally. A targeted brute-force
+  attack on /auth/login is not specifically prevented.
+
+[MISSING] No account lockout after N failed login attempts.
+[MISSING] No two-factor authentication (2FA/MFA).
+[MISSING] No refresh token mechanism. Users must re-login every 8 hours.
+[MISSING] Login and logout events are not written to an audit log.
+
+
+==================================================
+5. ROLE AND PERMISSION STRUCTURE
+==================================================
+
+--- 5A. THE 11 ROLES ---
+
+Each user has exactly one role. The role determines what they can see and do.
+
+  Role Name               | Who Uses It
+  ------------------------|----------------------------------------------
+  SUPER_ADMIN             | System owner — manages users, roles, and settings
+  DIRECTOR                | Top management — sees everything including margins
+  SALES_MANAGER           | Runs sales team — sees full pipeline, approves proposals
+  SALES_ENGINEER          | Individual sales — manages own deals and proposals
+  PROJECT_MANAGER         | Leads project delivery — manages gate progress
+  DESIGN_ENGINEER         | Does technical design — works on assigned projects
+  PROCUREMENT             | Buys equipment — manages vendors, POs, deliveries
+  SITE_SUPERVISOR         | On-site execution — updates site logs and checklists
+  COMMISSIONING_ENGINEER  | Commissions systems — testing, handover, asset register
+  OM_ENGINEER             | Operates and maintains — tickets, warranty, maintenance
+  FINANCE_ADMIN           | Handles money — contracts, invoices, payment status
+
+--- 5B. SCOPE LEVELS (WHAT EACH ROLE CAN SEE) ---
+
+The system has 4 visibility scopes:
+
+  "own"      = Can only see records they created or own
+  "team"     = Can see records owned by anyone in their same role
+  "assigned" = Can see records they have been explicitly added to
+  "all"      = Can see everything regardless of ownership
+
+Examples:
+  Sales Engineer: opportunity:view:own   (only sees their own deals)
+  Sales Manager:  opportunity:view:all   (sees all deals in the pipeline)
+  Director:       contract:view:all      (sees all contracts and values)
+  Project Manager: project:view:assigned (sees projects they are assigned to)
+
+--- 5C. SEEDED USERS (FOR TESTING) ---
+
+These users exist in the database after running the seed:
+
+  Email                          | Role               | Password
+  -------------------------------|--------------------|--------------
+  see@pekatgroup.com             | SUPER_ADMIN        | Solaroo123!
+  director@pekatgroup.com        | DIRECTOR           | Test@1234
+  salesmanager@pekatgroup.com    | SALES_MANAGER      | Test@1234
+  salesengineer@pekatgroup.com   | SALES_ENGINEER     | Test@1234
+  projectmanager@pekatgroup.com  | PROJECT_MANAGER    | Test@1234
+  designengineer@pekatgroup.com  | DESIGN_ENGINEER    | Test@1234
+  procurement@pekatgroup.com     | PROCUREMENT        | Test@1234
+  sitesupervisor@pekatgroup.com  | SITE_SUPERVISOR    | Test@1234
+  commissioneng@pekatgroup.com   | COMMISSIONING_ENG  | Test@1234
+  omengineer@pekatgroup.com      | OM_ENGINEER        | Test@1234
+  financeadmin@pekatgroup.com    | FINANCE_ADMIN      | Test@1234
+
+  [RISK] These are seeded test accounts. In production, these accounts must
+  be deactivated or have their passwords changed before going live.
+
+--- 5D. ROLE-LEVEL PERMISSION ENFORCEMENT SUMMARY ---
+
+  Role                   | Enforced in Code  | Key Concern
+  -----------------------|-------------------|-----------------------------------
+  SUPER_ADMIN            | Partial           | Must be restricted to admin routes
+  DIRECTOR               | Partial           | Margin/cost access depends on field
+  |                      |                   | stripping being called consistently
+  SALES_MANAGER          | Partial           | First approver in proposal chain
+  SALES_ENGINEER         | Partial           | "own" scope must be enforced at
+  |                      |                   | service layer, not just route level
+  PROJECT_MANAGER        | Partial           | "assigned" scope needs ProjectMember
+  |                      |                   | records — no UI to add members yet
+  DESIGN_ENGINEER        | Partial           | Same as Project Manager
+  PROCUREMENT            | Partial           | No frontend pages to use yet
+  SITE_SUPERVISOR        | Partial           | No dedicated frontend pages yet
+  COMMISSIONING_ENGINEER | Partial           | No dedicated frontend pages yet
+  OM_ENGINEER            | Partial           | O&M frontend is a stub
+  FINANCE_ADMIN          | Partial           | No contract frontend pages yet
+
+"Partial" means: The permission records exist in the database, the guard
+infrastructure is built, but AUTHZ_ENFORCE must be "true" AND service-layer
+scope checks must be added to fully enforce all scopes correctly.
+
+
+==================================================
+6. DATABASE DESIGN STATUS
+==================================================
+
+Database: PostgreSQL
+ORM: Prisma (schema split into 10 files by domain)
+
+--- 6A. ALL MODELS FOUND ---
+
+AUTH DOMAIN (auth.prisma):
+  User           - id, email, passwordHash, name, roleId, isActive
+  Role           - id, name, displayName, description
+  Permission     - resource, action, scope (e.g. "opportunity:create:own")
+  RolePermission - links Role to Permission (many-to-many)
+  UserPermission - per-user permission overrides (grant or deny specific perms)
+  Team           - team groupings (created but not yet used in UI)
+  TeamMember     - links users to teams
+  ProjectMember  - tracks which users are on which projects (for "assigned" scope)
+  OpportunityMember - tracks which users are on which opportunities (for scope)
+
+CRM DOMAIN (crm.prisma):
+  Account         - id, accountCode, name, type, industry, region, isActive
+  Contact         - id, firstName, lastName, email, phone, jobTitle
+  AccountContact  - links contacts to accounts with relationship type
+  Site            - id, siteCode, name, address, lat/lon, gridCategory
+  SitePhoto       - photo uploads linked to a site
+  Opportunity     - id, opportunityCode, title, stage, estimatedValue, pvKwp, bessKw
+  OpportunityStageHistory - records every stage change (who, when, reason)
+  Activity        - calls, emails, meetings, notes linked to accounts/opportunities
+
+PROPOSALS DOMAIN (proposals.prisma):
+  SiteSurvey      - site technical survey data (energy, demand, infrastructure)
+  LoadProfile     - energy load profile data files
+  SolutionOption  - proposed system configurations (solar size, BESS size)
+  Proposal        - id, proposalCode, opportunityId, title
+  ProposalVersion - versionNo, title, approvalStatus, CAPEX, margin, payback
+  ProposalAssumptionSet - locked technical/commercial assumptions per version
+  ProposalApproval - approver, decision, comments, timestamp per approval step
+
+PROJECTS DOMAIN (projects.prisma):
+  Project          - projectCode, status, budget, startDate, targetCOD
+  ProjectGate      - 6 gates per project with status and approval
+  GateDeliverable  - structured checklist items per gate (G1-01, G2-01-01, etc.)
+  Milestone        - key dates tracked per project
+  Task             - to-do items assigned to team members
+  Issue            - problems with severity (LOW/MEDIUM/HIGH/CRITICAL)
+  Risk             - risks with likelihood, impact, mitigation plan
+  Rfi              - Requests for Information
+  Submittal        - Documents submitted for review/approval
+  Variation        - Contract changes (scope, cost)
+  CommissioningTest - commissioning test records
+  PunchlistItem    - defects list before handover
+  ProjectTeamAssignment - user-to-project assignment with role
+
+CONTRACTS DOMAIN (contracts.prisma):
+  Contract         - contractNo, value, payment terms, retention %, dates
+  ContractMilestone - payment triggers with amounts and dates
+  Invoice          - invoiceNo, amount, tax, payment status
+  Budget           - by category (Equipment, Civil, Labour, Commissioning)
+
+DOCUMENTS DOMAIN (documents.prisma):
+  Document         - docCode, title, type, status, linked to gate
+  DocumentRevision - revision code (A/B/C or 1/2/3), fileUrl, approval status
+  Transmittal      - batched document submissions to clients
+  TransmittalItem  - links documents to transmittals
+
+PROCUREMENT DOMAIN (procurement.prisma):
+  [UNCONFIRMED exact models — likely: Vendor, Rfq, PurchaseOrder, Delivery]
+
+O&M DOMAIN (om.prisma):
+  [UNCONFIRMED exact models — likely: Asset, MaintenancePlan, MaintenanceRecord,
+   ServiceTicket, WarrantyClaim]
+
+AUDIT DOMAIN (audit.prisma):
+  [UNCONFIRMED exact models — likely: AuditLog, Notification]
+
+--- 6B. KEY RELATIONSHIPS ---
+
+  Account     -> many Sites, many Contacts, many Opportunities
+  Opportunity -> many Proposals, one Project (auto-created on WON)
+  Proposal    -> many ProposalVersions -> many ProposalApprovals
+  Project     -> 6 ProjectGates -> many GateDeliverables
+  Project     -> Tasks, Milestones, Issues, Risks, RFIs, Submittals, Variations
+  Contract    -> ContractMilestones, Invoices, Budgets
+  Document    -> DocumentRevisions, linked to Project Gates
+
+--- 6C. DATABASE CONCERNS ---
+
+[RISK] Proposal.createdByUserId is stored as a plain string with no foreign key
+  constraint to the User table. If a user is deleted, the reference becomes an
+  orphan with no error. This can cause reporting or display issues.
+
+[RISK] File paths (fileUrl) stored in the database point to local disk paths.
+  When the system migrates to AWS S3 (which is the plan), all existing records
+  will have broken file paths. A migration strategy is needed.
+
+[RISK] OpportunityMember and Team models exist in the schema but there is no
+  API endpoint or UI to add users to opportunities or teams. This means the
+  "assigned" scope in the permission system cannot work for non-project resources
+  (e.g., a Sales Engineer cannot be added to a specific opportunity to gain
+  shared access with a colleague).
+
+[MISSING] No consistent soft-delete strategy. Some models have isActive, others
+  do not. Hard-deleted records cannot be recovered.
+
+[MISSING] No general field-level audit log. No table records "who changed what
+  field, from what value, to what value, at what time." Only stage changes
+  (OpportunityStageHistory) and approval decisions (ProposalApproval) are tracked.
+
+
+==================================================
+7. API / BACKEND STATUS
+==================================================
+
+--- 7A. CONFIRMED ENDPOINTS ---
+
+  Auth:
+    POST /auth/login              - Login (returns JWT cookie)
+    POST /auth/register           - Create account [RISK: may be unrestricted]
+    GET  /auth/me                 - Get current user profile
+
+  Accounts:
+    GET    /accounts              - List (search, filter, paginate)
+    POST   /accounts              - Create
+    GET    /accounts/:id          - Detail
+    PATCH  /accounts/:id          - Update
+    DELETE /accounts/:id          - Delete
+
+  Contacts:
+    GET    /contacts              - List
+    POST   /contacts              - Create
+    GET    /contacts/:id          - Detail
+    PATCH  /contacts/:id          - Update
+
+  Sites:
+    GET    /sites                 - List
+    POST   /sites                 - Create
+    GET    /sites/:id             - Detail
+    PATCH  /sites/:id             - Update
+
+  Opportunities:
+    GET    /opportunities         - List (searchable, filterable by stage)
+    POST   /opportunities         - Create (starts at LEAD stage)
+    GET    /opportunities/:id     - Detail (with stage history)
+    PATCH  /opportunities/:id     - Update fields
+    POST   /opportunities/:id/transition - Advance/change stage
+
+  Proposals:
+    GET    /proposals             - List (filterable by status)
+    POST   /proposals             - Create proposal + version 1
+    GET    /proposals/:id         - Detail (all versions + approvals)
+    POST   /proposals/:id/versions            - Create new version
+    PATCH  /proposals/:id/versions/:vno       - Edit a draft version
+    PATCH  /proposals/:id/versions/:vno/submit - Submit for approval
+    POST   /proposals/:id/versions/:vno/decision - Approve/Reject/Return
+
+  Projects:
+    GET    /projects              - List
+    POST   /projects              - Create (auto-triggered by WON opportunity)
+    GET    /projects/:id          - Detail (gates, tasks, team)
+    PATCH  /projects/:id          - Update
+    PATCH  /projects/:id/gates/:gateNo         - Update gate status
+    PATCH  /projects/:id/gates/:gateNo/deliverables/:code - Update deliverable
+    GET    /projects/:id/tasks    - List tasks
+    POST   /projects/:id/tasks    - Create task
+
+  Documents:
+    GET    /documents             - List (filter by opportunityId or projectId)
+    POST   /documents/upload      - Upload file (base64 JSON body)
+    GET    /documents/:id/download - Download file (streams directly)
+    DELETE /documents/:id         - Delete document
+
+  Admin:
+    GET    /admin/users           - List all users
+    POST   /admin/users           - Create user
+    GET    /admin/users/:id       - Get user
+    PATCH  /admin/users/:id       - Edit user
+    DELETE /admin/users/:id       - Delete user
+    GET    /admin/roles           - List roles
+
+  Contracts, Procurement, Gates, Assets, Maintenance, Reporting, AI, Notifications:
+    [INFERENCE: Full REST CRUD endpoints exist. Exact routes unconfirmed.]
+
+--- 7B. VALIDATION ---
+
+All request bodies are validated using Zod schemas via ZodValidationPipe.
+Invalid input returns a structured 400 error response.
+All responses are wrapped in: { success: true, data: ... } or { success: false, error: ... }
+
+--- 7C. API PROTECTION GAPS ---
+
+[RISK] Not all controllers have @RequirePermission on all endpoints. Some
+  may have been written without permission decorators, leaving them accessible
+  to any authenticated user regardless of role.
+
+[RISK] AUTHZ_ENFORCE must be "true" in environment or permission checks do
+  not block anything (only log warnings). See Section 4B.
+
+[RISK] Service-layer scope enforcement (own/team/assigned) requires explicit
+  calls to authzService.requirePermission() inside each service method.
+  This adds a second layer of protection. Coverage across all services is
+  incomplete — record-level access may not be fully enforced.
+
+[RISK] GET /documents/:id/download streams a file from a path stored in the
+  database. If that path is not sanitized before use, a malicious DB record
+  could cause path traversal (reading files outside the uploads directory).
+
+[RISK] POST /documents/upload accepts up to 25MB of base64 JSON. No virus
+  scanning or MIME type verification beyond what is stored. A malicious file
+  could be uploaded and later downloaded by other users.
+
+[MISSING] No health check endpoint (e.g., GET /health) documented.
+[MISSING] Stricter rate limiting on auth endpoints.
+[MISSING] Audit logging of data access events (only errors are logged now).
+
+
+==================================================
+8. FRONTEND / UI STATUS
+==================================================
+
+Pages and Status:
+
+  CORE CRM (usable today):
+    /login               [DONE]   Email/password login
+    /accounts            [DONE]   List, create, edit, view detail
+    /contacts            [DONE]   List, create, edit, view detail
+    /sites               [DONE]   List, create, edit, view detail
+    /opportunities       [DONE]   Pipeline list, create, stage transitions,
+                                  document uploads per opportunity, WON -> project
+    /proposals           [DONE]   List, create, multi-version detail, approve/reject
+    /projects            [DONE]   List and gate/deliverable detail view
+    /admin/users         [DONE]   Create, edit, deactivate users
+
+  SECONDARY (backend ready, frontend incomplete or missing):
+    /documents           [PARTIAL] Basic view — full doc control UI not built
+    /dashboard           [PARTIAL] Page exists — metrics content may be placeholder
+    /om                  [STUB]   Page exists with no real content
+    /contracts           [MISSING] Backend done — no frontend pages
+    /procurement         [MISSING] Backend done — no frontend pages
+    /assets              [MISSING] Backend done — no frontend pages
+    /maintenance         [MISSING] Backend done — no frontend pages
+    /reports             [MISSING] Backend module exists — no dedicated pages
+    /ai (copilot)        [MISSING] Backend integrated — no UI surface found
+
+  Navigation sidebar shows: Dashboard, Accounts, Contacts, Sites, Opportunities,
+  Proposals, Projects, Procurement, Documents, O&M, Reports.
+
+  [NOTE] Some sidebar links lead to missing or stub pages (O&M, Procurement).
+  Users clicking those links will see an empty or placeholder screen.
+
+
+==================================================
+9. MAJOR GAPS AND RISKS
+==================================================
+
+CRITICAL — Fix Before Any Production Use:
+
+  [RISK-1] AUTHZ_ENFORCE not confirmed as "true" in production.
+    Without this, all authenticated users have full access to all endpoints.
+    Action: Set AUTHZ_ENFORCE=true in production environment. Verify immediately.
+
+  [RISK-2] POST /auth/register may be unrestricted.
+    If open, anyone can register accounts and assign themselves any role.
+    Action: Add SUPER_ADMIN permission check or disable the endpoint entirely.
+
+  [RISK-3] Default COOKIE_SECRET is "change-this-secret" in source code.
+    If the .env file does not override this, session cookies can be forged.
+    Action: Set a cryptographically random COOKIE_SECRET in every environment.
+
+  [RISK-4] Test user accounts exist in production DB after seeding.
+    seeded test users (see@pekatgroup.com, director@pekatgroup.com, etc.)
+    with known passwords should be deactivated before going live.
+    Action: Run a script to deactivate all seeded test users in production.
+
+HIGH — Fix Soon:
+
+  [RISK-5] Sensitive field stripping (margin, contract value) is not automatic.
+    Each service that returns financial data must explicitly call
+    stripSensitiveFields(). If any service skips this call, margin data
+    or contract values can be seen by users who should not have access.
+    Action: Audit every service that returns proposal or contract data.
+
+  [RISK-6] File download path traversal risk.
+    The documents download endpoint streams a file using a path stored in the DB.
+    If this path is used directly without validation, a crafted DB record could
+    allow reading arbitrary server files.
+    Action: Validate and sanitize fileUrl before constructing file path.
+
+  [RISK-7] Proposal approver matching is fragile.
+    The system finds the Sales Manager and Director by matching their role's
+    display name text (e.g., "contains 'Sales Manager'"). If that role is
+    renamed in the admin panel, the approval chain silently breaks.
+    Action: Match by role.name (exact code enum) instead of display name text.
+
+  [RISK-8] "Assigned" scope cannot work for opportunities.
+    The permission system has "assigned" scope for opportunities (meaning a
+    user can see an opportunity they are explicitly added to). But there is no
+    API endpoint or UI to add users to opportunities. OpportunityMember records
+    can never be created. This makes the scope non-functional.
+    Action: Build an "Add Team Member" API and UI for opportunities.
+
+  [RISK-9] No email notifications for approvals.
+    When a proposal is submitted for approval, the designated approver receives
+    no email or notification. They must manually check the system.
+    The background worker (BullMQ) is not yet functional.
+    Action: Implement the worker job that sends approval request emails.
+
+MEDIUM — Address in Next Development Phase:
+
+  [GAP-10] No test coverage at all.
+    Zero test files exist in the entire codebase. Any code change may break
+    existing features with no automated safety net.
+    Action: Write unit tests for proposal approval logic, stage transitions,
+    and auth endpoints at minimum.
+
+  [GAP-11] No CI/CD pipeline.
+    There is no automated process to build, test, and deploy the application.
+    Action: Set up GitHub Actions or equivalent.
+
+  [GAP-12] No general audit log.
+    Field-level changes (who edited what, from what value, to what value)
+    are not recorded. Only stage transitions and approval decisions are tracked.
+    Action: Implement AuditLog writes for all key field changes.
+
+  [GAP-13] No account lockout on failed logins.
+    Action: Add lockout after 5-10 failed attempts.
+
+  [GAP-14] File storage is local disk.
+    In a production server, local disk uploads are not backed up automatically
+    and will be lost if the server is replaced. AWS S3 SDK is already installed.
+    Action: Switch documents service to use S3 before production launch.
+
+  [GAP-15] Missing frontend pages for many backend modules.
+    Contracts, Procurement, Assets, Maintenance, and Reports have full backend
+    implementations but no usable frontend pages.
+
+  [GAP-16] Dashboard has no confirmed live data.
+    The dashboard page may show placeholder content. Key metrics (open pipeline
+    value, projects by gate, pending approvals) are not confirmed to be wired.
+
+  [GAP-17] Technical Assessment module not built.
+    Site survey data capture and load profile analysis — needed for proposal
+    preparation — have no backend service or frontend UI yet. The database
+    models (SiteSurvey, LoadProfile) exist and are ready.
+
+LOW — Later Improvements:
+
+  [GAP-18] No refresh token. Users re-login every 8 hours.
+  [GAP-19] No 2FA/MFA support.
+  [GAP-20] No soft-delete strategy consistently applied across all models.
+  [GAP-21] No file virus scanning on upload.
+  [GAP-22] ThrottlerModule uses in-memory storage. Fails under multi-server setup.
+  [GAP-23] AI copilot has no user-facing interface.
+  [GAP-24] No React error boundary components in frontend (raw error screens).
+
+
+==================================================
+10. WHAT LOOKS GOOD SO FAR
+==================================================
+
+STRONG-1: Architecture quality
+  Clean separation of concerns. Monorepo is well-structured. Backend modules
+  are well-organized. Shared type package prevents type drift between frontend
+  and backend. TypeScript strict mode throughout.
+
+STRONG-2: Database design
+  Comprehensive schema covering the full project lifecycle. Correct use of
+  enums, relations, foreign keys. Split schema files per domain are maintainable.
+  All major business entities are modeled correctly.
+
+STRONG-3: Permission system design
+  The RBAC system with resources, actions, scopes, and per-user overrides is
+  sophisticated and production-grade in architecture. Field-level access control
+  for margin and financial data is thoughtfully designed. The 382-line permission
+  seed is detailed and covers the real role matrix of the organization.
+
+STRONG-4: Business rules in code (not just data)
+  Opportunity stage transitions are enforced by explicit rules — no arbitrary
+  stage jumps possible. Proposal version immutability is enforced server-side.
+  Gate deliverable checklists are structured templates, not freeform text.
+  These are correct implementations of real engineering business processes.
+
+STRONG-5: Proposal versioning and approval chain
+  Multi-version proposals with a 2-step approval chain is a real business
+  requirement correctly implemented. Version history, decision audit trail,
+  and allowedActions per user per version is a clean and practical design.
+
+STRONG-6: Six-gate project delivery model
+  Gates G1-G6 with structured deliverable codes (G1-01, G2-01-01...) maps
+  directly to how engineering firms actually manage project delivery. The
+  deliverable templates are defined in code as reusable structures.
+
+STRONG-7: Auto-project creation from WON opportunity
+  The business rule "a project is only created when an opportunity is won,
+  never manually" is correctly enforced at the service layer, not just the UI.
+
+STRONG-8: Seed data quality
+  11 test users covering every role, with a complete permission matrix, means
+  any developer can test the system from day one without manual setup.
+
+STRONG-9: Document control model
+  Document revisions, approval status, revision codes (A/B/C), linked to
+  project gates, with transmittal batching matches real document control
+  practice used in engineering project delivery.
+
+STRONG-10: Core CRM is usable today
+  Accounts, Contacts, Sites, Opportunities, and Proposals all have complete
+  list + create + edit + detail pages with search, filters, and pagination.
+  The core sales pipeline is a working application.
+
+
+==================================================
+11. RECOMMENDED NEXT STEPS
+==================================================
+
+IMMEDIATE (before any real user uses the system):
+
+  1. Confirm and set AUTHZ_ENFORCE=true in the production server environment.
+     Verify every API controller has @RequirePermission on all endpoints.
+
+  2. Restrict or remove POST /auth/register to prevent unauthorized account
+     creation. New users should only be created through /admin/users by SUPER_ADMIN.
+
+  3. Set a strong COOKIE_SECRET and JWT_SECRET in production .env.
+     Reject startup if defaults are detected.
+
+  4. Deactivate all seeded test user accounts in the production database.
+
+  5. Review all services that return proposal or contract data and confirm
+     stripSensitiveFields() is called before returning financial data to clients.
+
+NEAR-TERM (next development sprint):
+
+  6. Fix proposal approver lookup to use exact role.name code instead of
+     display name string matching.
+
+  7. Build OpportunityMember API + UI (add/remove team members on an opportunity)
+     so the "assigned" permission scope works for multi-user deals.
+
+  8. Implement background worker jobs — at minimum: send email to approver when
+     a proposal is submitted for approval, and send notification when a gate
+     deliverable is uploaded for review.
+
+  9. Wire the dashboard to real API data. Show: pipeline value by stage, active
+     projects by gate, pending approvals count, overdue deliverables.
+
+  10. Build frontend pages for Contracts, Procurement, O&M (backend is ready).
+
+  11. Add login-specific rate limiting (e.g., 10 attempts per minute per IP)
+      separate from the global 200 requests/minute limit.
+
+  12. Implement account lockout after repeated failed login attempts.
+
+LATER (hardening and expansion):
+
+  13. Write tests — at minimum: unit tests for approval chain logic, stage
+      machine transitions, and auth endpoints.
+
+  14. Set up CI/CD pipeline (GitHub Actions) with linting, type checking, build.
+
+  15. Switch document storage from local disk to AWS S3 (SDK already installed).
+
+  16. Build Technical Assessment module — site survey data capture, load
+      profile upload, solution sizing. DB models already exist.
+
+  17. Implement audit log for field-level changes.
+
+  18. Build AI Copilot UI — a chat panel for asking questions about opportunities,
+      projects, and documents (Claude API is already connected in the backend).
+
+  19. Add refresh tokens so users are not forced to re-login every 8 hours.
+
+  20. Add React error boundary components to the frontend.
+
+
+==================================================
+12. FILES CHATGPT SHOULD REVIEW FIRST
+==================================================
+
+For security and auth review:
+  1.  apps/api/src/modules/auth/auth.service.ts
+      Why: Login logic, JWT issuance, password checking.
+
+  2.  apps/api/src/modules/auth/auth.controller.ts
+      Why: Shows whether /register is restricted or open.
+
+  3.  apps/api/src/common/authz/permission.guard.ts
+      Why: The AUTHZ_ENFORCE mode switch — key security risk.
+
+  4.  apps/api/src/common/authz/authz.service.ts
+      Why: Full permission checking, scope resolution, field stripping.
+
+  5.  packages/types/src/permissions.ts
+      Why: Full vocabulary of what resources, actions, and scopes exist.
+
+  6.  packages/db/src/seeds/permissions.seed.ts
+      Why: Exactly what each role is allowed to do (the role matrix).
+
+For database design review:
+  7.  packages/db/prisma/schema/auth.prisma
+      Why: User, Role, Permission model foundation.
+
+  8.  packages/db/prisma/schema/proposals.prisma
+      Why: Proposal versioning and approval model.
+
+  9.  packages/db/prisma/schema/projects.prisma
+      Why: Project, Gate, Deliverable model — most complex domain.
+
+  10. packages/db/prisma/schema/contracts.prisma
+      Why: Financial data model (invoices, budgets, contract values).
+
+  11. packages/db/src/seed.ts
+      Why: Shows test users, roles, and credentials seeded.
+
+For architecture and business logic review:
+  12. apps/api/src/app.module.ts
+      Why: All modules registered, global guards declared.
+
+  13. apps/api/src/modules/proposals/proposals.service.ts
+      Why: Most complex business logic — versioning + approval chain.
+
+  14. apps/api/src/modules/opportunities/opportunities.service.ts
+      Why: Stage machine enforcement + auto-project creation on WON.
+
+  15. packages/workflows/src/index.ts
+      Why: Stage transition rules and gate deliverable templates.
+
+  16. apps/api/src/modules/documents/documents.service.ts
+      Why: File path construction — security concern (path traversal).
+
+For frontend review:
+  17. apps/web/src/lib/api-client.ts
+      Why: All API calls go through this — error handling, 401 redirect.
+
+  18. apps/web/src/app/(app)/opportunities/[id]/page.tsx
+      Why: Most complex page — stage transitions, document uploads, WON modal.
+
+  19. apps/web/src/app/(app)/proposals/[id]/page.tsx
+      Why: Multi-version UI, approval chain visualization, decision modal.
+
+  20. apps/web/src/components/layout/sidebar.tsx
+      Why: Navigation — shows what modules are accessible to all logged-in users.
+
+
+==================================================
+13. KEY SNIPPETS FOR ARCHITECTURE REVIEW
+==================================================
+
+--- SNIPPET 1: PERMISSION VOCABULARY ---
+File: packages/types/src/permissions.ts
+Why: Defines every resource, action, and scope in the system.
+
+  RESOURCES include: account, contact, site, opportunity, proposal,
+    proposal_version, project, project_gate, milestone, issue, risk,
+    document, drawing, vendor, rfq, purchase_order, delivery, site_log,
+    checklist, punch_list, testing_sheet, handover_doc, asset,
+    maintenance_ticket, warranty_record, contract, invoice_milestone,
+    margin (sensitive), cost (sensitive), payment_status (sensitive),
+    reporting, user_admin, role_admin
+
+  ACTIONS: view, create, edit, delete, submit, approve, export,
+    view_estimated (margin), view_actual (margin), view_value (contract)
+
+  SCOPES: own, team, assigned, all
+
+
+--- SNIPPET 2: AUTHZ ENFORCE RISK (Inferred structure) ---
+File: apps/api/src/common/authz/permission.guard.ts
+Why: Shows the critical AUTHZ_ENFORCE mode — audit-only vs enforcing.
+
+  if (!this.configService.get('AUTHZ_ENFORCE')) {
+    // AUDIT MODE: logs but does NOT block the request
+    this.logger.warn(`AUTHZ_AUDIT: user=${user.id} action=${resource}:${action}`);
+    return true; // <-- request goes through regardless of permission
+  }
+  // ENFORCE MODE: blocks if permission is denied
+  return this.authzService.hasPermission(user, resource, action);
+
+
+--- SNIPPET 3: PROPOSAL APPROVER LOOKUP (fragility risk) ---
+File: apps/api/src/modules/proposals/proposals.service.ts
+Why: Approval chain breaks if role display names are changed.
+
+  private async findApprovalUsers() {
+    const [salesManagers, directors] = await Promise.all([
+      this.prisma.user.findMany({
+        where: {
+          isActive: true,
+          role: { displayName: { contains: 'Sales Manager', mode: 'insensitive' } }
+        }
+      }),
+      this.prisma.user.findMany({
+        where: {
+          isActive: true,
+          role: { displayName: { contains: 'Director', mode: 'insensitive' } }
+        }
+      }),
+    ]);
+    // Only takes the FIRST user found for each role.
+    // If role is renamed or display name changes — breaks silently.
+    return {
+      salesManagerId: salesManagers[0]?.id ?? null,
+      directorId:     directors[0]?.id ?? null,
+    };
+  }
+
+
+--- SNIPPET 4: AUTO-PROJECT CREATION ON WON ---
+File: apps/api/src/modules/opportunities/opportunities.service.ts
+Why: Shows the business rule enforcement — projects never created manually.
+
+  // During stage transition:
+  if (dto.toStage === 'WON' && dto.projectCode && dto.projectManagerId && dto.projectName) {
+    await this.projectsService.create(
+      {
+        projectCode:      dto.projectCode,
+        name:             dto.projectName,
+        opportunityId:    id,
+        accountId:        current.accountId,
+        siteId:           current.siteId,
+        projectManagerId: dto.projectManagerId,
+        budgetBaseline:   dto.budgetBaseline,
+        startDate:        dto.startDate,
+        targetCod:        dto.targetCod,
+      },
+      user,
+    );
+  }
+  // If projectCode, projectManagerId, or projectName is missing,
+  // the project is NOT created (no WON validation enforced currently — gap).
+
+
+--- SNIPPET 5: FILE UPLOAD (BASE64 WORKAROUND) ---
+File: apps/web/src/lib/api-client.ts
+Why: File uploads use base64 JSON encoding (not multipart/form-data).
+     This is a workaround for Fastify not supporting standard file uploads
+     without an additional package. Max effective file size ~18MB.
+
+  export async function uploadFile(path, file, fields) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = (reader.result as string).split(',')[1]; // strip data: prefix
+        const response = await apiClient.post(path, {
+          ...fields,
+          fileBase64:    base64,
+          fileName:      file.name,
+          mimeType:      file.type,
+          fileSizeBytes: file.size,
+        });
+        // ...
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+  // Risk: Large files cause high memory usage. 25MB body limit set in main.ts.
+  // No virus scanning. MIME type taken from browser (easily spoofed).
+
+
+--- SNIPPET 6: RESPONSE ENVELOPE FORMAT ---
+File: apps/api/src/common/interceptors/response.interceptor.ts (inferred)
+Why: All API responses follow this format — important for any ChatGPT review
+     of frontend/backend API contract.
+
+  Success: { "success": true, "data": { ...actualData } }
+  Error:   { "success": false, "error": { "code": "...", "message": "...",
+                                           "details": [...] } }
+
+
+==================================================
+END OF AUDIT
+File: project_status_for_chatgpt.txt
+==================================================

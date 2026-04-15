@@ -1,0 +1,353 @@
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
+import { PrismaService } from '../../common/database/prisma.service';
+import { UserContext, PaginatedResult } from '@solaroo/types';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import {
+  CreateOpportunityDto,
+  UpdateOpportunityDto,
+  TransitionStageDto,
+  OpportunityQueryDto,
+} from './opportunities.dto';
+import { Prisma, OpportunityStage } from '@solaroo/db';
+import {
+  assertValidTransition,
+  OPPORTUNITY_STAGE_TRANSITIONS,
+} from '@solaroo/workflows';
+import { ProjectsService } from '../projects/projects.service';
+
+// ─── Shared select shape ──────────────────────────────────────────────────────
+
+const OPP_SELECT = {
+  id: true,
+  opportunityCode: true,
+  title: true,
+  stage: true,
+  commercialModel: true,
+  estimatedValue: true,
+  estimatedPvKwp: true,
+  estimatedBessKw: true,
+  estimatedBessKwh: true,
+  probabilityPercent: true,
+  expectedAwardDate: true,
+  summary: true,
+  risks: true,
+  competitors: true,
+  lostReason: true,
+  nextAction: true,
+  nextActionDueDate: true,
+  lastStatusNote: true,
+  isActive: true,
+  createdAt: true,
+  updatedAt: true,
+  accountId: true,
+  siteId: true,
+  ownerUserId: true,
+  account: { select: { id: true, accountCode: true, name: true } },
+  site: { select: { id: true, siteCode: true, name: true, gridCategory: true } },
+  owner: { select: { id: true, name: true, email: true } },
+} as const;
+
+export type OpportunityRecord = {
+  id: string;
+  opportunityCode: string;
+  title: string;
+  stage: OpportunityStage;
+  commercialModel: string | null;
+  estimatedValue: unknown;
+  estimatedPvKwp: unknown;
+  estimatedBessKw: unknown;
+  estimatedBessKwh: unknown;
+  probabilityPercent: number | null;
+  expectedAwardDate: Date | null;
+  summary: string | null;
+  risks: string | null;
+  competitors: string | null;
+  lostReason: string | null;
+  nextAction: string | null;
+  nextActionDueDate: Date | null;
+  lastStatusNote: string | null;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  accountId: string;
+  siteId: string;
+  ownerUserId: string;
+  account: { id: string; accountCode: string; name: string };
+  site: { id: string; siteCode: string; name: string; gridCategory: string };
+  owner: { id: string; name: string; email: string };
+};
+
+export type OpportunityListItem = OpportunityRecord & {
+  _count: { proposals: number };
+};
+
+export type OpportunityDetail = OpportunityRecord & {
+  stageHistory: {
+    id: string;
+    fromStage: OpportunityStage | null;
+    toStage: OpportunityStage;
+    reason: string | null;
+    changedAt: Date;
+  }[];
+  allowedNextStages: OpportunityStage[];
+};
+
+@Injectable()
+export class OpportunitiesService {
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => ProjectsService))
+    private readonly projectsService: ProjectsService,
+  ) {}
+
+  // ─── List ──────────────────────────────────────────────────────────────────
+
+  async findAll(
+    query: OpportunityQueryDto,
+    _user: UserContext,
+  ): Promise<PaginatedResult<OpportunityListItem>> {
+    const { search, accountId, siteId, ownerUserId, stage, isActive, overdue, page, pageSize, sortBy, sortDir } = query;
+
+    const now = new Date();
+    const where: Prisma.OpportunityWhereInput = {
+      ...(search && {
+        OR: [
+          { title: { contains: search, mode: 'insensitive' } },
+          { opportunityCode: { contains: search, mode: 'insensitive' } },
+          { account: { name: { contains: search, mode: 'insensitive' } } },
+        ],
+      }),
+      ...(accountId && { accountId }),
+      ...(siteId && { siteId }),
+      ...(ownerUserId && { ownerUserId }),
+      ...(stage && { stage }),
+      ...(isActive !== undefined && { isActive }),
+      // Overdue: nextActionDueDate is in the past, and deal is still open
+      ...(overdue && {
+        nextActionDueDate: { lt: now },
+        stage: { notIn: ['WON', 'LOST'] },
+      }),
+    };
+
+    const [total, items] = await Promise.all([
+      this.prisma.opportunity.count({ where }),
+      this.prisma.opportunity.findMany({
+        where,
+        orderBy: { [sortBy]: sortDir },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          ...OPP_SELECT,
+          _count: { select: { proposals: true } },
+        },
+      }),
+    ]);
+
+    return {
+      items: items as OpportunityListItem[],
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
+  }
+
+  // ─── Detail ────────────────────────────────────────────────────────────────
+
+  async findById(id: string, _user: UserContext): Promise<OpportunityDetail> {
+    const opp = await this.prisma.opportunity.findUnique({
+      where: { id },
+      select: {
+        ...OPP_SELECT,
+        stageHistory: {
+          orderBy: { changedAt: 'desc' },
+          select: {
+            id: true,
+            fromStage: true,
+            toStage: true,
+            reason: true,
+            changedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!opp) throw new NotFoundException(`Opportunity ${id} not found`);
+
+    const allowedNextStages = OPPORTUNITY_STAGE_TRANSITIONS[opp.stage].allowedNext as OpportunityStage[];
+
+    return { ...(opp as unknown as OpportunityRecord), stageHistory: opp.stageHistory, allowedNextStages };
+  }
+
+  // ─── Create ────────────────────────────────────────────────────────────────
+
+  async create(dto: CreateOpportunityDto, user: UserContext): Promise<OpportunityDetail> {
+    const opportunityCode = await this.generateCode();
+
+    const opp = await this.prisma.opportunity.create({
+      data: {
+        ...dto,
+        opportunityCode,
+        stage: 'LEAD',
+        estimatedValue: dto.estimatedValue ?? null,
+        estimatedPvKwp: dto.estimatedPvKwp ?? null,
+        estimatedBessKw: dto.estimatedBessKw ?? null,
+        estimatedBessKwh: dto.estimatedBessKwh ?? null,
+        expectedAwardDate: dto.expectedAwardDate ? new Date(dto.expectedAwardDate) : null,
+        stageHistory: {
+          create: {
+            fromStage: null,
+            toStage: 'LEAD',
+            changedByUserId: user.id,
+            reason: 'Opportunity created',
+          },
+        },
+      },
+      select: {
+        ...OPP_SELECT,
+        stageHistory: {
+          orderBy: { changedAt: 'desc' },
+          select: { id: true, fromStage: true, toStage: true, reason: true, changedAt: true },
+        },
+      },
+    });
+
+    // Create document folder structure for the new opportunity (best-effort)
+    const folderSlugs = ['site-information', 'drawings', 'costing', 'proposal', 'contracts', 'other'];
+    const oppUploadsBase = path.join(process.cwd(), 'uploads', 'opportunities', opp.id);
+    await Promise.all(
+      folderSlugs.map((slug) =>
+        fs.mkdir(path.join(oppUploadsBase, slug), { recursive: true }).catch(() => {}),
+      ),
+    );
+
+    const allowedNextStages = OPPORTUNITY_STAGE_TRANSITIONS['LEAD'].allowedNext as OpportunityStage[];
+    return { ...(opp as unknown as OpportunityRecord), stageHistory: opp.stageHistory, allowedNextStages };
+  }
+
+  // ─── Update ────────────────────────────────────────────────────────────────
+
+  async update(id: string, dto: UpdateOpportunityDto, user: UserContext): Promise<OpportunityDetail> {
+    await this.findById(id, user);
+
+    const opp = await this.prisma.opportunity.update({
+      where: { id },
+      data: {
+        ...dto,
+        estimatedValue: dto.estimatedValue ?? undefined,
+        estimatedPvKwp: dto.estimatedPvKwp ?? undefined,
+        estimatedBessKw: dto.estimatedBessKw ?? undefined,
+        estimatedBessKwh: dto.estimatedBessKwh ?? undefined,
+        expectedAwardDate: dto.expectedAwardDate ? new Date(dto.expectedAwardDate) : undefined,
+        nextActionDueDate: dto.nextActionDueDate ? new Date(dto.nextActionDueDate) : undefined,
+      },
+      select: {
+        ...OPP_SELECT,
+        stageHistory: {
+          orderBy: { changedAt: 'desc' },
+          select: { id: true, fromStage: true, toStage: true, reason: true, changedAt: true },
+        },
+      },
+    });
+
+    const allowedNextStages = OPPORTUNITY_STAGE_TRANSITIONS[opp.stage].allowedNext as OpportunityStage[];
+    return { ...(opp as unknown as OpportunityRecord), stageHistory: opp.stageHistory, allowedNextStages };
+  }
+
+  // ─── Stage transition ─────────────────────────────────────────────────────
+
+  async transitionStage(
+    id: string,
+    dto: TransitionStageDto,
+    user: UserContext,
+  ): Promise<OpportunityDetail> {
+    const current = await this.findById(id, user);
+
+    // Validate transition using workflow rules
+    try {
+      assertValidTransition(current.stage, dto.toStage as OpportunityStage);
+    } catch (err) {
+      throw new BadRequestException(err instanceof Error ? err.message : 'Invalid stage transition');
+    }
+
+    // LOST requires a reason
+    if (dto.toStage === 'LOST' && !dto.reason?.trim()) {
+      throw new BadRequestException('A reason is required when marking an opportunity as Lost');
+    }
+
+    const opp = await this.prisma.opportunity.update({
+      where: { id },
+      data: {
+        stage: dto.toStage as OpportunityStage,
+        ...(dto.toStage === 'LOST' && { lostReason: dto.reason }),
+        stageHistory: {
+          create: {
+            fromStage: current.stage,
+            toStage: dto.toStage as OpportunityStage,
+            changedByUserId: user.id,
+            reason: dto.reason ?? null,
+          },
+        },
+      },
+      select: {
+        ...OPP_SELECT,
+        stageHistory: {
+          orderBy: { changedAt: 'desc' },
+          select: { id: true, fromStage: true, toStage: true, reason: true, changedAt: true },
+        },
+      },
+    });
+
+    const allowedNextStages = OPPORTUNITY_STAGE_TRANSITIONS[dto.toStage as OpportunityStage].allowedNext as OpportunityStage[];
+    const result = { ...(opp as unknown as OpportunityRecord), stageHistory: opp.stageHistory, allowedNextStages };
+
+    // Auto-create project when marked WON
+    if (dto.toStage === 'WON' && dto.projectCode && dto.projectManagerId && dto.projectName) {
+      await this.projectsService.create(
+        {
+          projectCode:      dto.projectCode,
+          name:             dto.projectName,
+          opportunityId:    id,
+          accountId:        current.accountId,
+          siteId:           current.siteId,
+          projectManagerId: dto.projectManagerId,
+          budgetBaseline:   dto.budgetBaseline,
+          startDate:        dto.startDate,
+          targetCod:        dto.targetCod,
+        },
+        user,
+      );
+    }
+
+    return result;
+  }
+
+  // ─── Code generator ────────────────────────────────────────────────────────
+
+  private async generateCode(): Promise<string> {
+    const year = new Date().getFullYear().toString().slice(2); // "25"
+    const prefix = `OPP-${year}-`;
+
+    const latest = await this.prisma.opportunity.findFirst({
+      where: { opportunityCode: { startsWith: prefix } },
+      orderBy: { opportunityCode: 'desc' },
+      select: { opportunityCode: true },
+    });
+
+    let nextNum = 1;
+    if (latest) {
+      const match = latest.opportunityCode.match(/-(\d+)$/);
+      if (match) nextNum = parseInt(match[1], 10) + 1;
+    }
+
+    return `${prefix}${String(nextNum).padStart(3, '0')}`;
+  }
+}

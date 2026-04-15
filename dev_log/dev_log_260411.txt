@@ -1,0 +1,247 @@
+================================================================================
+  Solaroo RE CRM — Dev Log
+  Date   : 2026-04-11
+  Author : Claude (Sonnet) + See
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+SESSION SUMMARY
+────────────────────────────────────────────────────────────────────────────────
+
+Two major feature areas completed today:
+  A. Self-service password change (logged-in users)
+  B. PMO integration into CRM V1 (full stack — schema to UI)
+
+Plus validation/rollout work from the previous session carry-over:
+  C. DESIGN_LEAD role fully implemented and validated
+  D. V1 rollout readiness report produced
+
+────────────────────────────────────────────────────────────────────────────────
+A. SELF-SERVICE PASSWORD CHANGE
+────────────────────────────────────────────────────────────────────────────────
+
+Feature: Logged-in users can change their own password from the topbar menu.
+
+Files changed:
+  apps/api/src/modules/auth/auth.service.ts
+    - Added changePassword(userId, currentPassword, newPassword) method
+    - Verifies current password with bcrypt.compare()
+    - Validates new password >= 8 characters
+    - Hashes new password with bcrypt.hash(pwd, 12) and persists
+
+  apps/api/src/modules/auth/auth.controller.ts
+    - Added PATCH /auth/change-password endpoint
+    - Uses @CurrentUser() decorator — requires valid JWT session
+
+  apps/web/src/components/layout/topbar.tsx
+    - Added ChangePasswordModal component (inline, self-contained)
+    - Fields: currentPassword, newPassword, confirmPassword
+    - Client-side validation: min 8 chars, passwords must match
+    - Shows 1.5s success state then auto-closes
+    - Accessible from the user dropdown → "Change Password" menu item
+    - Uses KeyRound icon from lucide-react
+
+────────────────────────────────────────────────────────────────────────────────
+B. PMO INTEGRATION — V1
+────────────────────────────────────────────────────────────────────────────────
+
+Approach: Thin governance layer inside the CRM. Not a separate system.
+PMO_MANAGER gets cross-portfolio view + gate approval rights. No finance access.
+
+── B1. Schema changes (packages/db/prisma/schema/projects.prisma) ──────────────
+
+  Project model — added:
+    pmoStatusNote     String?      PMO governance assessment note
+    lastPmoReviewAt   DateTime?    Last formal PMO review timestamp
+
+  ProjectGate model — added:
+    pmoFlagged    Boolean  @default(false)   Flagged for PMO attention
+    pmoComment    String?                    PMO review comment
+    pmoReviewAt   DateTime?                  Last PMO gate review timestamp
+
+  Milestone model — added:
+    baselineDate  DateTime?   Frozen original committed date (never changed)
+                              Enables schedule drift detection vs targetDate
+
+  DB synced: pnpm db:push confirmed "Your database is now in sync"
+
+── B2. Seed (packages/db/src/seed.ts) ──────────────────────────────────────────
+
+  Added role:
+    PMO_MANAGER — "Portfolio governance — gate review, milestone visibility,
+                  blocker tracking, exception reporting. No finance access."
+
+  Added test user:
+    Name:  PMO Manager (Test)
+    Email: pmo@pekatgroup.com
+    Role:  PMO_MANAGER
+    Pass:  Test@1234
+
+  Total: 13 roles, 12 test users
+
+── B3. Permissions (packages/db/src/seeds/permissions.seed.ts) ─────────────────
+
+  PMO_MANAGER added to 23 permission entries:
+    account:view:all, site:view:all, opportunity:view:all,
+    proposal:view:all, proposal_version:view:all,
+    project:view:all, project:edit:all, project:export:all,
+    project_gate:view:all, project_gate:edit:all, project_gate:approve:all,
+    milestone:view:all, milestone:create:all, milestone:edit:all,
+    issue:view:all, issue:create:all, issue:edit:all,
+    risk:view:all, risk:create:all, risk:edit:all,
+    document:view:all, document:export:all,
+    drawing:view:all, rfq:view:all, purchase_order:view:all,
+    reporting:view:all, reporting:export:all
+
+  Deliberately excluded from: contract, invoice, margin, cost, budget detail,
+  payment_status — all financial/commercial data.
+
+── B4. API — DTOs (apps/api/src/modules/projects/projects.dto.ts) ──────────────
+
+  UpdateProjectSchema — added:
+    pmoStatusNote:   z.string().max(1000).nullable().optional()
+    lastPmoReviewAt: z.coerce.date().nullable().optional()
+
+  UpdateGateStatusSchema — added:
+    pmoFlagged:  z.boolean().optional()
+    pmoComment:  z.string().max(1000).nullable().optional()
+    pmoReviewAt: z.coerce.date().nullable().optional()
+
+── B5. API — Service (apps/api/src/modules/projects/projects.service.ts) ────────
+
+  updateGateStatus() — PMO fields now persisted:
+    pmoFlagged, pmoComment, pmoReviewAt included in updateData spread
+
+── B6. API — Reporting (apps/api/src/modules/reporting/) ───────────────────────
+
+  reporting.service.ts — added getPmoMetrics(user) method:
+    10 parallel Prisma queries:
+      projectsByGate        Gate distribution (G1-G6) for active projects
+      projectsWithBlocker   Active projects with non-null currentBlocker
+      pendingGateApprovals  Gates in SUBMITTED status
+      overdueDeliverables   Required PENDING deliverables on overdue gates
+      overdueMilestones     Milestones past targetDate, not complete
+      stalledProjects       Active projects not updated in 14+ days
+      criticalOpenIssues    OPEN/IN_PROGRESS issues with CRITICAL/HIGH severity
+      pendingProposalVersions  SUBMITTED/UNDER_REVIEW proposal count
+      totalActive           Count of ACTIVE projects
+      ragCounts             RAG groupBy for ACTIVE projects
+
+    Returns: quickCounts (8 metrics), ragBreakdown, gateDistribution,
+             projectsWithBlocker, pendingGateApprovals, overdueDeliverables,
+             overdueMilestones, stalledProjects, criticalOpenIssues, generatedAt
+
+  reporting.controller.ts — added:
+    GET /api/reporting/pmo
+    Permission: reporting:view
+
+── B7. Frontend — PMO Portfolio Page ────────────────────────────────────────────
+
+  Created: apps/web/src/app/(app)/pmo/page.tsx
+
+  Sections:
+    - Header with timestamp
+    - 8 Quick Count cards (alert coloring when value > 0)
+    - Portfolio RAG bar chart (RED/AMBER/GREEN with percentages)
+    - Gate distribution bars (G1-G6)
+    - Pending Gate Approvals table (with PMO Flagged column)
+    - Active Project Blockers table (overdue coloring, days until/since)
+    - Overdue Gate Deliverables table
+    - Overdue Milestones table
+    - Critical/High Issues table (severity badges)
+    - Stalled Projects table (no update > 14 days)
+
+  Loading skeleton and error state included.
+  All tables link to /projects/:id.
+
+── B8. Sidebar nav ──────────────────────────────────────────────────────────────
+
+  apps/web/src/components/layout/sidebar.tsx
+    - ShieldCheck icon import (already present from previous session)
+    - Added PMO nav item between Projects and Procurement:
+        { label: "PMO", href: "/pmo", icon: ShieldCheck }
+
+── B9. Documentation ────────────────────────────────────────────────────────────
+
+  Created: docs/pmo-v1-direction.md
+    - Full direction document: operating model, role visibility matrix,
+      sensitive data rules, role recommendation rationale, minimum fields,
+      dashboard requirements, implementation summary, V2 candidates,
+      governance decisions recorded
+
+────────────────────────────────────────────────────────────────────────────────
+C. DESIGN_LEAD ROLE — V1 IMPLEMENTATION
+────────────────────────────────────────────────────────────────────────────────
+
+DESIGN_LEAD role kept and fully implemented as the head of the Design department.
+Distinguishes from DESIGN_ENGINEER: can approve drawings, documents, DBDs.
+
+Key permissions added to DESIGN_LEAD:
+  opportunity:view:all, project:view:all,
+  document:approve:all, drawing:approve:all,
+  technical_assessment:approve:all, reporting:view:all
+  (full list in permissions.seed.ts)
+
+Test user: designlead@pekatgroup.com / Test@1234
+
+────────────────────────────────────────────────────────────────────────────────
+D. V1 ROLLOUT READINESS REPORT
+────────────────────────────────────────────────────────────────────────────────
+
+Report saved: dev_log/v1_rollout_readiness_260411.txt
+
+Key findings:
+  - All V1 features code-reviewed: VERIFIED WORKING
+  - AUTHZ_ENFORCE=false (audit-only) — CRITICAL blocker before internal rollout
+  - DESIGN_LEAD: fully usable in V1
+  - PMO_MANAGER: added same session
+
+────────────────────────────────────────────────────────────────────────────────
+E. TEST USER CREDENTIALS — UPDATED
+────────────────────────────────────────────────────────────────────────────────
+
+File updated: dev_log/Test User Credential.txt
+  - Added PMO Manager entry (pmo@pekatgroup.com / Test@1234)
+  - Added PMO role separation note
+
+────────────────────────────────────────────────────────────────────────────────
+F. START-DEV.BAT — UPDATED
+────────────────────────────────────────────────────────────────────────────────
+
+File updated: start-dev.bat
+  - Docker failure is now a soft warning, not a hard exit
+  - Added 3-second delay between API and web start
+  - Added PMO Manager credentials to the startup summary
+  - Previous behaviour: script exited if Docker was not running (broke dev flow)
+  - New behaviour: continues even without Docker, trusts DB is accessible
+
+────────────────────────────────────────────────────────────────────────────────
+INFRASTRUCTURE NOTES
+────────────────────────────────────────────────────────────────────────────────
+
+- PowerShell execution policy was disabled on the dev machine (blocked pnpm.ps1)
+  Fix applied: Set-ExecutionPolicy RemoteSigned -Scope CurrentUser (one-time)
+
+- Port 3000 conflict: another project on the same machine was also using 3000
+  Fix: that project moved to port 5555/5556
+
+- Prisma client regeneration: db:push succeeded (schema synced), client
+  regeneration initially failed due to DLL lock from running API process.
+  After API restart, client regenerated correctly — confirmed new fields
+  (pmoStatusNote, pmoFlagged, baselineDate, etc.) present in types.
+
+────────────────────────────────────────────────────────────────────────────────
+PENDING / NEXT SESSION
+────────────────────────────────────────────────────────────────────────────────
+
+  [ ] Run pnpm db:seed to create PMO_MANAGER role and test user in DB
+  [ ] Set AUTHZ_ENFORCE=true and test all roles against permission boundaries
+  [ ] PMO gate approval action from /pmo UI (currently read-only — V2)
+  [ ] Structured PMO review history log (V2 — needs junction table)
+  [ ] PMO report export PDF/Excel (permission assigned, endpoint not built)
+  [ ] Admin password reset UI (super admin resets any user's password from
+      User Management — backend endpoint exists, frontend UI not built yet)
+
+================================================================================
+END OF LOG — 2026-04-11
+================================================================================

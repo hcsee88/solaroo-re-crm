@@ -1,0 +1,198 @@
+DEV LOG — 10 April 2026
+Solaroo RE CRM | Pekat Teknologi Sdn Bhd
+========================================
+
+
+## What's Been Built
+
+### The Foundation
+A working web app you can log into at localhost:3000 with email/password. Sessions are secure
+(httpOnly cookies). There are 11 user roles seeded — SUPER_ADMIN, Director, Sales Manager,
+Sales Engineer, and so on.
+
+Login credentials:
+  System Admin:  see@pekatgroup.com    / Solaroo123!  (User Management only)
+  Director:      director@pekatgroup.com / Test@1234  (Business approvals, full data view)
+  All other test users: [rolename]@pekatgroup.com / Test@1234
+  Full list: dev_log/Test User Credential.txt
+
+
+### Role Separation (SUPER_ADMIN vs DIRECTOR)
+SUPER_ADMIN — system maintenance only:
+  - Create, edit, deactivate users and assign roles
+  - Cannot see any business data (no opportunities, projects, margin, etc.)
+  - "User Management" tab only visible to this role
+
+DIRECTOR — business role:
+  - Full access to all business data (pipeline, projects, margin, costs)
+  - Approves proposals, gates, and contracts
+  - Cannot access User Management
+
+
+### The CRM Core
+
+Accounts — Companies you deal with. Create, search, filter by type.
+
+Contacts — People at those companies. Linked to accounts.
+
+Sites — Physical locations linked to accounts. Stores grid category, coordinates.
+
+Opportunities — Sales deals. Each goes through defined stages:
+  Lead → Qualified → Data Collection → Site Assessment →
+  Concept Design → Budgetary Proposal → Firm Proposal →
+  Negotiation → Contracting → WON / LOST
+  Stage changes are controlled (no arbitrary jumps). Every change is logged.
+
+  When marking WON: system asks for projectCode + PM → auto-creates the project.
+
+
+### The Permission System
+261 permissions across all 10 business roles + SUPER_ADMIN.
+A Sales Engineer only sees their own opportunities.
+A Project Manager only sees assigned projects.
+Margin and financial fields restricted to Director + Finance only.
+Currently AUDIT-ONLY (set AUTHZ_ENFORCE=true to enforce).
+
+
+### The Projects Module (BUILT TODAY)
+
+Projects are the core of execution. Each project has:
+  - Project number: P001, P002, P003... (auto-generated)
+  - Project code: SREYY-NNNXXX (e.g. SRE26-PSO002, user-defined)
+  - Project name (e.g. Quality Hero Phase 2)
+  - Linked to account, site, and source opportunity
+
+6-Gate Lifecycle (mirrors actual project folder structure):
+  G1 — Contract & Project Handover
+       Deliverables: LOA/WO, Final Proposal, Scope of Work, BOQ,
+       T&C, Project Timeline, Key Contacts, Project Confirmation
+       Form, Baseline Budget, Internal KOM
+
+  G2 — Design Freeze
+       Deliverables: Design Summary, Design Methodology, Site Survey,
+       Equipment Selection, Drawing Master List, Equipment Freeze List,
+       RACI Matrix, Updated Baseline Cost, G2 Master Tracking
+
+  G3 — Procurement Release
+       Deliverables: Procurement Plan, Purchase Orders, Delivery Schedule,
+       Import/Logistics Plan, HSE Plan, Permits & Approvals,
+       Subcontractor Agreements
+
+  G4 — Site Execution
+       Deliverables: Site Readiness, IFC Drawings, Site Execution Plan,
+       Material Delivery & Install Tracking, Progress Reports,
+       Change & Deviation Log
+
+  G5 — Commissioning
+       Deliverables: Test Plan, FAT Records, SAT Records, As-Built Drawings,
+       O&M Manual, Warranty Docs, Client Acceptance Certificate,
+       Punchlist Clearance
+
+  G6 — Financial Close Out
+       Deliverables: Final Invoice, Payment Reconciliation, Retention Release,
+       Cost vs Budget Reconciliation, Final Margin Record,
+       Lessons Learned, Project Archive
+
+Gate rules:
+  - Creating a project auto-scaffolds all 6 gates + all deliverables
+  - Gate 1 opens immediately; G2–G6 are NOT_STARTED until previous gate approved
+  - PM submits gate → Director approves → next gate opens automatically
+  - Approving a gate checks that all required deliverables are at least UPLOADED
+
+Deliverable statuses:
+  PENDING → UPLOADED → SUBMITTED → APPROVED (or NOT_REQUIRED)
+
+Project list page (/projects):
+  Shows: project number, code, name, account, PM, gate progress pips (G1–G6),
+  target COD, status, open issues count
+
+Project detail page (/projects/:id):
+  Left panel: 6 expandable gate cards, each with deliverable checklist.
+    Inline status update (click dropdown to mark UPLOADED/SUBMITTED/APPROVED).
+    Gate action buttons (Submit / Approve / Reject).
+  Right sidebar: Key dates, budget (baseline + updated), site info,
+    activity counters (issues, risks, milestones, variations, punch items).
+
+
+### Company Logo
+Sidebar updated to display the official Solaroo RE logo.
+ACTION REQUIRED: Save the logo file to:
+  apps/web/public/solaroo-logo.png
+  (PNG with transparent background, minimum 280px wide recommended)
+
+
+---
+
+
+## What's Next (in order)
+
+1. CREATE PROJECT FORM (/projects/new)
+   Form to input projectCode, name, PM, start/COD dates, budget.
+   (Currently can only create projects via the WON opportunity transition.)
+
+2. "MARK AS WON" MODAL on Opportunity Detail
+   When sales marks an opportunity WON, show a modal to enter
+   projectCode + PM — which then auto-creates the project.
+
+3. PROPOSAL VERSIONS MODULE
+   Create proposal linked to opportunity, version it, attach assumption set
+   (system size, equipment, commercial terms), lock on approval.
+
+4. DOCUMENT UPLOAD per Gate Deliverable
+   File upload UI on deliverable rows — links uploaded files to their
+   specific gate deliverable (e.g. the BOQ file attaches to G1-01-04).
+
+5. DASHBOARD (Director + Sales views)
+   Pipeline summary, project status by gate, pending approvals,
+   upcoming CODs, recent activity.
+
+6. FIX PRE-RENDER WARNINGS (minor)
+   Add `export const dynamic = 'force-dynamic'` to list pages
+   to prevent Next.js static pre-render attempts.
+
+7. PROCUREMENT MODULE
+   RFQs, vendor quotes, purchase orders, delivery tracking — linked to projects.
+
+8. O&M MODULE
+   Asset register (created at commissioning). Maintenance plans, service tickets,
+   warranty tracking per serial number.
+
+
+---
+
+
+## Tech Stack Reference
+
+Frontend:   Next.js 14 App Router — localhost:3000
+Backend:    NestJS + Fastify — localhost:4000
+Database:   PostgreSQL (Docker) + Prisma ORM
+Auth:       JWT httpOnly cookies
+Monorepo:   pnpm + Turborepo
+State:      @tanstack/react-query (via Providers wrapper in root layout)
+
+Packages:
+  @solaroo/db        — Prisma schema + client
+  @solaroo/types     — Shared TypeScript types + permission vocabulary
+  @solaroo/workflows — Stage transitions, gate templates, deliverable definitions
+
+Auto-generated codes:
+  Projects:      P001, P002...    (projectNumber autoincrement, formatted in app)
+  Project code:  user-defined     (SREYY-NNNXXX format, validated by regex)
+  Accounts:      ACC-XXXX
+  Sites:         SITE-XXXX
+  Opportunities: OPP-YY-XXX
+
+
+---
+
+
+## Key Developer Notes
+
+- Never check role names directly in UI or API code. Use permissions via AuthzService.
+- Controllers return raw data — the global ResponseInterceptor wraps all responses.
+- Import Prisma from '@solaroo/db', not '@prisma/client' directly.
+- packages/workflows/src/index.ts must stay as a single self-contained file
+  (no relative .ts re-exports — causes Node ESM runtime failure).
+- SUPER_ADMIN has no business permissions. Do not add DIRECTOR to user_admin permissions.
+- Gate approval checks required deliverables before allowing approval.
+  Required = isRequired: true. NOT_REQUIRED counts as satisfied.

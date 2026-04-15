@@ -1,0 +1,389 @@
+// projects.prisma — projects, gates, deliverables, milestones, tasks, issues, risks, rfis, submittals, variations, commissioning
+
+enum ProjectStatus {
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum GateStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum DeliverableStatus {
+  PENDING      // not yet uploaded
+  UPLOADED     // file(s) attached, awaiting review
+  SUBMITTED    // formally submitted for approval
+  APPROVED     // approved / signed off
+  NOT_REQUIRED // marked as not applicable for this project
+}
+
+enum IssueStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum IssueSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RfiStatus {
+  OPEN
+  ANSWERED
+  CLOSED
+}
+
+enum SubmittalStatus {
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  APPROVED_WITH_COMMENTS
+  REJECTED
+  RESUBMIT
+}
+
+enum VariationStatus {
+  IDENTIFIED
+  UNDER_ASSESSMENT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum RagStatus {
+  GREEN
+  AMBER
+  RED
+}
+
+// ─── Projects ─────────────────────────────────────────────────────────────────
+
+model Project {
+  id                    String        @id @default(cuid())
+  projectNumber         Int           @unique @default(autoincrement()) // P001, P002... (formatted in app layer)
+  projectCode           String        @unique  // e.g. SRE26-PSO002
+  name                  String
+  opportunityId         String        @unique
+  contractId            String?       @unique
+  accountId             String
+  siteId                String
+
+  contract              Contract?     @relation(fields: [contractId], references: [id])
+  status                ProjectStatus @default(ACTIVE)
+  currentGateNo         Int           @default(1)
+
+  // Budget tracking — updated at key gates
+  budgetBaseline        Decimal?      @db.Decimal(15, 2) // G1-03 Baseline Budget
+  budgetUpdated         Decimal?      @db.Decimal(15, 2) // G2-05 Updated Baseline Cost
+  actualCostToDate      Decimal?      @db.Decimal(15, 2)
+  marginBaseline        Decimal?      @db.Decimal(15, 2)
+
+  startDate             DateTime?
+  targetCod             DateTime?     // Commercial Operation Date
+  actualCod             DateTime?
+  notes                 String?
+  // ── V1 RAG / blocker tracking ───────────────────────────────────────────
+  ragStatus             RagStatus     @default(GREEN)
+  currentBlocker        String?       // Brief description of current blocker
+  blockerOwnerId        String?       // Who is responsible for resolving it
+  blockerDueDate        DateTime?     // When blocker must be resolved
+  // ── PMO governance fields ────────────────────────────────────────────────
+  pmoStatusNote         String?       // PMO's latest assessment note on this project
+  lastPmoReviewAt       DateTime?     // When PMO last formally reviewed this project
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  projectManagerId      String
+  designLeadId          String?
+  procurementLeadId     String?
+
+  opportunity           Opportunity             @relation(fields: [opportunityId], references: [id])
+  account               Account                 @relation(fields: [accountId], references: [id])
+  site                  Site                    @relation(fields: [siteId], references: [id])
+  projectManager        User                    @relation("ProjectManager", fields: [projectManagerId], references: [id])
+  blockerOwner          User?                   @relation("BlockerOwner", fields: [blockerOwnerId], references: [id])
+
+  teamAssignments       ProjectTeamAssignment[]
+  gates                 ProjectGate[]
+  milestones            Milestone[]
+  tasks                 Task[]
+  issues                Issue[]
+  risks                 Risk[]
+  rfis                  Rfi[]
+  submittals            Submittal[]
+  variations            Variation[]
+  documents             Document[]
+  purchaseOrders        PurchaseOrder[]
+  assets                Asset[]
+  commissioningTests    CommissioningTest[]
+  punchlistItems        PunchlistItem[]
+  members               ProjectMember[]
+
+  @@map("projects")
+}
+
+model ProjectTeamAssignment {
+  id          String   @id @default(cuid())
+  projectId   String
+  userId      String
+  role        String   // e.g. "Design Engineer", "Site Supervisor"
+  assignedAt  DateTime @default(now())
+
+  project     Project  @relation(fields: [projectId], references: [id])
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@unique([projectId, userId])
+  @@map("project_team_assignments")
+}
+
+// ─── Gates ────────────────────────────────────────────────────────────────────
+
+model ProjectGate {
+  id               String      @id @default(cuid())
+  projectId        String
+  gateNo           Int         // 1–6
+  gateName         String      // e.g. "Contract & Project Handover"
+  status           GateStatus  @default(NOT_STARTED)
+  targetDate       DateTime?
+  actualDate       DateTime?
+  approvalRequired Boolean     @default(true)
+  approvedBy       String?
+  approvedAt       DateTime?
+  rejectedBy       String?
+  rejectedAt       DateTime?
+  remarks          String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  ownerUserId      String
+  owner            User        @relation("GateOwner", fields: [ownerUserId], references: [id])
+  project          Project     @relation(fields: [projectId], references: [id])
+
+  // ── PMO review fields ──────────────────────────────────────────────────
+  pmoFlagged       Boolean     @default(false) // PMO flagged this gate for attention
+  pmoComment       String?                      // PMO's review comment
+  pmoReviewAt      DateTime?                    // When PMO last reviewed this gate
+
+  deliverables     GateDeliverable[]
+
+  @@unique([projectId, gateNo])
+  @@map("project_gates")
+}
+
+// A structured deliverable within a gate (maps to the subfolder in the project file structure)
+// e.g. G1-01 "Contract Pack", G1-03 "Baseline Budget", G2-01 "Design Basis Document"
+model GateDeliverable {
+  id              String            @id @default(cuid())
+  gateId          String
+  code            String            // e.g. "G1-01", "G2-01-01"
+  name            String            // e.g. "Contract Pack", "Design Summary"
+  description     String?           // guidance on what to upload
+  isRequired      Boolean           @default(true)
+  sortOrder       Int               @default(0)
+  status          DeliverableStatus @default(PENDING)
+  submittedAt     DateTime?
+  approvedAt      DateTime?
+  approvedById    String?
+  notes           String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  gate            ProjectGate       @relation(fields: [gateId], references: [id], onDelete: Cascade)
+  documents       Document[]
+
+  @@unique([gateId, code])
+  @@map("gate_deliverables")
+}
+
+// ─── Milestones & Tasks ───────────────────────────────────────────────────────
+
+model Milestone {
+  id            String    @id @default(cuid())
+  projectId     String
+  title         String
+  baselineDate  DateTime? // Original baseline date — frozen at commitment, never changed
+  targetDate    DateTime  // Current working forecast (updated by PM as plan changes)
+  actualDate    DateTime?
+  isComplete    Boolean   @default(false)
+  notes         String?
+  createdAt     DateTime  @default(now())
+
+  project       Project   @relation(fields: [projectId], references: [id])
+
+  @@map("milestones")
+}
+
+model Task {
+  id            String    @id @default(cuid())
+  projectId     String
+  title         String
+  description   String?
+  dueDate       DateTime?
+  isComplete    Boolean   @default(false)
+  completedAt   DateTime?
+  priority      String?   // LOW, MEDIUM, HIGH
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  assigneeId    String?
+  project       Project   @relation(fields: [projectId], references: [id])
+  assignee      User?     @relation("TaskAssignee", fields: [assigneeId], references: [id])
+
+  @@map("tasks")
+}
+
+// ─── Issues, Risks ────────────────────────────────────────────────────────────
+
+model Issue {
+  id            String        @id @default(cuid())
+  projectId     String
+  issueNo       String
+  title         String
+  description   String?
+  severity      IssueSeverity @default(MEDIUM)
+  status        IssueStatus   @default(OPEN)
+  raisedDate    DateTime      @default(now())
+  targetDate    DateTime?
+  closedDate    DateTime?
+  raisedById    String?
+  assignedToId  String?
+  resolution    String?
+
+  project       Project       @relation(fields: [projectId], references: [id])
+
+  @@map("issues")
+}
+
+model Risk {
+  id             String    @id @default(cuid())
+  projectId      String
+  riskNo         String
+  title          String
+  description    String?
+  likelihood     RiskLevel @default(MEDIUM)
+  impact         RiskLevel @default(MEDIUM)
+  overallRisk    RiskLevel @default(MEDIUM)
+  mitigationPlan String?
+  owner          String?
+  status         String    @default("OPEN") // OPEN, MITIGATED, CLOSED, ACCEPTED
+  raisedDate     DateTime  @default(now())
+  reviewDate     DateTime?
+
+  project        Project   @relation(fields: [projectId], references: [id])
+
+  @@map("risks")
+}
+
+// ─── RFIs, Submittals, Variations ────────────────────────────────────────────
+
+model Rfi {
+  id            String    @id @default(cuid())
+  projectId     String
+  rfiNo         String
+  subject       String
+  description   String?
+  raisedDate    DateTime  @default(now())
+  requiredDate  DateTime?
+  responseDate  DateTime?
+  status        RfiStatus @default(OPEN)
+  raisedById    String?
+  answeredById  String?
+  response      String?
+
+  project       Project   @relation(fields: [projectId], references: [id])
+
+  @@unique([projectId, rfiNo])
+  @@map("rfis")
+}
+
+model Submittal {
+  id              String          @id @default(cuid())
+  projectId       String
+  submittalNo     String
+  title           String
+  type            String          // e.g. "Drawing", "Datasheet", "Method Statement"
+  status          SubmittalStatus @default(PENDING)
+  submittedDate   DateTime?
+  reviewDeadline  DateTime?
+  reviewedDate    DateTime?
+  reviewedById    String?
+  comments        String?
+  createdAt       DateTime        @default(now())
+
+  project         Project         @relation(fields: [projectId], references: [id])
+
+  @@unique([projectId, submittalNo])
+  @@map("submittals")
+}
+
+model Variation {
+  id              String          @id @default(cuid())
+  projectId       String
+  variationNo     String
+  title           String
+  description     String?
+  estimatedValue  Decimal?        @db.Decimal(15, 2)
+  approvedValue   Decimal?        @db.Decimal(15, 2)
+  status          VariationStatus @default(IDENTIFIED)
+  raisedDate      DateTime        @default(now())
+  approvedDate    DateTime?
+  approvedById    String?
+
+  project         Project         @relation(fields: [projectId], references: [id])
+
+  @@unique([projectId, variationNo])
+  @@map("variations")
+}
+
+// ─── Commissioning ────────────────────────────────────────────────────────────
+
+model CommissioningTest {
+  id              String    @id @default(cuid())
+  projectId       String
+  testName        String
+  testDate        DateTime?
+  result          String?   // PASS, FAIL, CONDITIONAL
+  testedByUserId  String?
+  witnessName     String?
+  remarks         String?
+  fileUrl         String?
+  createdAt       DateTime  @default(now())
+
+  project         Project   @relation(fields: [projectId], references: [id])
+
+  @@map("commissioning_tests")
+}
+
+model PunchlistItem {
+  id            String    @id @default(cuid())
+  projectId     String
+  description   String
+  raisedDate    DateTime  @default(now())
+  targetDate    DateTime?
+  closedDate    DateTime?
+  isClosed      Boolean   @default(false)
+  category      String?   // e.g. "Safety", "Functional", "Cosmetic"
+  photoUrl      String?
+
+  project       Project   @relation(fields: [projectId], references: [id])
+
+  @@map("punchlist_items")
+}

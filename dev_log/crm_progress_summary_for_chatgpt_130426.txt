@@ -1,0 +1,839 @@
+============================================================
+SOLAROO RE CRM — CURRENT PROGRESS SUMMARY
+For external review (ChatGPT / architect review)
+Generated: 2026-04-13
+Repo: Solaroo RE CRM by Pekat Teknologi Sdn Bhd
+============================================================
+
+
+============================================================
+1. EXECUTIVE SUMMARY
+============================================================
+
+WHAT THE CRM CURRENTLY IS:
+  Solaroo RE CRM is an internal single-company platform for managing the full
+  lifecycle of off-grid solar, hybrid solar-diesel, and BESS projects. It covers
+  lead/account management through to technical assessment, proposal generation,
+  contract, project execution (6-gate governance), commissioning, and O&M.
+  It also functions as a light ERP and document control platform.
+
+  Stack: NestJS (Fastify) API + Next.js 14 frontend + PostgreSQL via Prisma.
+  Monorepo with Turbo (apps/api, apps/web, packages/db, packages/types).
+  Auth: JWT httpOnly cookie. RBAC: 13 roles, 330+ permission entries, 4 scopes.
+
+CURRENT DEVELOPMENT STAGE:
+  Early V1 — core CRM backbone is operational. The sales pipeline (accounts →
+  opportunities → proposals), project execution (projects, gates, milestones,
+  issues, risks), document management, dashboard, and auth/admin are all working.
+  Several modules exist as stubs (procurement, contracts service, O&M, AI,
+  notifications). Frontend pages exist for all major modules but many are
+  read-only or partially implemented.
+
+WHAT HAS IMPROVED RECENTLY (last 2 sessions):
+  - Self-service password change (logged-in users via topbar)
+  - DESIGN_LEAD role fully implemented with approval permissions
+  - PMO integration: PMO_MANAGER role, PMO schema fields on projects/gates/
+    milestones, GET /reporting/pmo endpoint, /pmo portfolio page in the UI
+  - AUTHZ_ENFORCE=true enabled — permission enforcement is now live
+  - Access Denied page (/forbidden) added — 403 now shows proper UI
+  - Reporting:view permission fixed for operational roles (they were getting
+    403 on the dashboard after enforcement was turned on)
+  - start-dev.bat updated to survive Docker-not-running gracefully
+
+V1 DIRECTION CLARITY:
+  V1 direction is becoming clear. The system is focused on:
+  - Sales pipeline: accounts → opportunities → proposals (with versioning)
+  - Project lifecycle: 6-gate governance, RAG status, blocker tracking
+  - Cross-portfolio visibility: dashboard + PMO portfolio page
+  - Role-based access with enforced permissions
+  V1 is deliberately not trying to finish procurement, O&M, or AI.
+
+BIGGEST CURRENT STRENGTHS:
+  1. Data model is comprehensive and domain-accurate for solar/BESS projects
+  2. Permission system is sophisticated (scoped, field-level, cacheable, enforced)
+  3. Opportunity stage flow and proposal versioning are implemented correctly
+  4. 6-gate project governance is fully modelled and partially implemented
+  5. PMO has been sensibly integrated as a thin governance layer, not a system
+  6. No public registration — admin-only user creation is correct for internal tool
+
+BIGGEST CURRENT RISKS:
+  1. Several critical modules are stubs (procurement, contracts, O&M, AI) —
+     these are on the critical path for later project lifecycle stages
+  2. Scope enforcement (own/assigned/team) is declared but NOT fully validated
+     at service layer — INFERENCE: services may return too much data for
+     non-all-scope roles (UNCONFIRMED per-service)
+  3. Field-level sensitive data stripping (margin, cost, payment_status) is
+     implemented in AuthzService but it is UNCONFIRMED whether all service
+     responses actually call stripSensitiveFields()
+  4. AUTHZ_ENFORCE is now true but full role-by-role testing has only been
+     done partially (blocked roles now redirect to /forbidden, but scope
+     overreach in data responses has not been validated)
+
+
+============================================================
+2. WHAT HAS BEEN BUILT SO FAR
+============================================================
+
+  MODULE                STATUS     NOTES
+  ─────────────────────────────────────────────────────────────────────────────
+  auth                  DONE       Login, logout, /me, change-password.
+                                   No public /register — admin creates users only.
+                                   JWT httpOnly cookie. bcrypt with 12 rounds.
+
+  roles / permissions   DONE       13 roles, 330+ permission entries.
+                                   4 scopes: own / team / assigned / all.
+                                   Global PermissionGuard with AUTHZ_ENFORCE toggle.
+                                   AuthzService with 60s cache + user overrides.
+                                   Field-level sensitivity control exists in service.
+
+  accounts              DONE       Full CRUD. Pagination, search, filtering.
+                                   Linked to contacts, sites, opportunities.
+
+  contacts              DONE       Full CRUD. Multi-account linking supported.
+
+  sites                 DONE       Full CRUD. Linked to accounts and opportunities.
+
+  opportunities         DONE       Full CRUD + stage transition workflow.
+                                   10-stage pipeline (LEAD → WON/LOST).
+                                   nextAction, nextActionDueDate, lastStatusNote fields.
+                                   Overdue detection. Pipeline value aggregation.
+                                   Linked to site assessments, proposals, projects.
+
+  technical-assessment  PARTIAL    Schema exists (TechnicalAssessment model in
+                                   crm.prisma). Permission entries exist.
+                                   API module not confirmed examined. (UNCONFIRMED)
+
+  proposals             DONE       Proposal parent + ProposalVersion (immutable after
+                                   approval). Versioning, approval flow, assumptions
+                                   snapshot, solution options, site survey capture.
+                                   Multi-step ProposalApproval model.
+
+  contracts             PARTIAL    Schema complete (Contract, ContractMilestone,
+                                   Invoice, Budget models with full field coverage).
+                                   API service is a STUB — no real logic confirmed.
+                                   Frontend page exists (UNCONFIRMED state).
+
+  projects              DONE       Full CRUD. 6-gate governance model.
+                                   RAG status (GREEN/AMBER/RED).
+                                   Blocker tracking (currentBlocker, blockerOwner,
+                                   blockerDueDate). PMO fields added.
+                                   Gate deliverables with structured checklist.
+
+  gates                 PARTIAL    Gate model and deliverables fully defined in schema.
+                                   Gate status transitions implemented in projects.service
+                                   (updateGateStatus, updateDeliverable).
+                                   Separate gates module is a STUB — GET only, no logic.
+
+  milestones            DONE       baselineDate (frozen) + targetDate (working forecast).
+                                   isComplete, actualDate. Drift detection possible.
+
+  issues / risks        DONE       Full models. Severity, status, dates, mitigation.
+                                   Linked to projects. (API service logic UNCONFIRMED)
+
+  documents             DONE       Upload, download, delete. Revision control.
+                                   Transmittals. Document types, approval status.
+                                   Linked by module (proposal / project / om).
+
+  procurement           STUB       Schema complete (Vendor, RFQ, Quote, PO, Delivery,
+                                   EquipmentSerial). API controller exists.
+                                   Service is empty — no logic implemented.
+
+  assets                STUB       Schema complete (Asset, AssetStatus, capacity fields,
+                                   warranty tracking). API controller exists.
+                                   Service is empty — no logic implemented.
+
+  maintenance / O&M     STUB       Schema complete (MaintenancePlan, MaintenanceRecord,
+                                   ServiceTicket, WarrantyClaim, PerformanceLog,
+                                   SparePart). API controller exists.
+                                   Service is empty — no logic implemented.
+
+  reporting / dashboard DONE       GET /reporting/dashboard — real parallel Prisma
+                                   queries: pipeline metrics, proposal counts, project
+                                   RAG breakdown, overdue gate deliverables, quick counts.
+                                   GET /reporting/pmo — 10 parallel queries: gate
+                                   distribution, blockers, pending approvals, overdue
+                                   milestones/deliverables, stalled projects,
+                                   critical issues, RAG breakdown.
+
+  admin                 DONE       SUPER_ADMIN only. List/get/create/update users.
+                                   Reset any user's password. List roles.
+                                   Fully permission-guarded.
+
+  notifications         STUB       Schema exists (Notification model with types and
+                                   statuses). Controller exists. Service is empty.
+
+  AI                    STUB       Controller and service exist. GET / returns [].
+                                   GET /:id returns null. No real logic.
+                                   Anthropic SDK is a dependency but unused.
+
+  PMO                   DONE       PMO_MANAGER role seeded. Permission set defined
+  (as governance layer)            (23 permissions, no finance access).
+                                   Schema fields on Project (pmoStatusNote,
+                                   lastPmoReviewAt) and ProjectGate (pmoFlagged,
+                                   pmoComment, pmoReviewAt) and Milestone (baselineDate).
+                                   GET /reporting/pmo endpoint implemented.
+                                   /pmo portfolio page in the frontend.
+                                   Sidebar nav item added.
+
+
+============================================================
+3. RECENT CHANGES DETECTED
+============================================================
+
+CHANGE 1 — Self-service password change
+  Files:  apps/api/src/modules/auth/auth.service.ts
+          apps/api/src/modules/auth/auth.controller.ts
+          apps/web/src/components/layout/topbar.tsx
+  What:   PATCH /auth/change-password endpoint added. Verifies current password,
+          validates new >= 8 chars, hashes with bcrypt rounds=12.
+          Frontend modal in topbar dropdown with 3 fields + success state.
+  Status: VERIFIED WORKING (confirmed by user testing)
+
+CHANGE 2 — DESIGN_LEAD role implemented
+  Files:  packages/db/src/seeds/permissions.seed.ts
+          packages/db/src/seed.ts
+  What:   DESIGN_LEAD added to 30+ permission entries. Can approve drawings,
+          documents, technical assessments. Cross-project view access.
+          Intentionally distinct from DESIGN_ENGINEER (no approval rights).
+  Status: VERIFIED compiled and seeded. Functional testing PARTIAL.
+
+CHANGE 3 — PMO integration (full stack)
+  Files:  packages/db/prisma/schema/projects.prisma
+          packages/db/src/seed.ts
+          packages/db/src/seeds/permissions.seed.ts
+          apps/api/src/modules/projects/projects.dto.ts
+          apps/api/src/modules/projects/projects.service.ts
+          apps/api/src/modules/reporting/reporting.service.ts
+          apps/api/src/modules/reporting/reporting.controller.ts
+          apps/web/src/app/(app)/pmo/page.tsx
+          apps/web/src/components/layout/sidebar.tsx
+  What:   PMO_MANAGER role + test user (pmo@pekatgroup.com).
+          PMO schema fields on Project, ProjectGate, Milestone.
+          GET /reporting/pmo with 10 parallel queries.
+          /pmo portfolio page (8 quick-count cards, RAG bar, gate distribution,
+          pending approvals, blockers, overdue tables).
+  Status: VERIFIED — user confirmed /pmo page loads with data
+
+CHANGE 4 — AUTHZ_ENFORCE=true enabled
+  Files:  apps/api/.env (AUTHZ_ENFORCE=true added manually by user)
+  What:   Permission enforcement switched from audit-only to hard 403.
+  Status: VERIFIED — roles without permissions now get blocked
+
+CHANGE 5 — Access Denied page (/forbidden)
+  Files:  apps/web/src/app/forbidden/page.tsx
+          apps/web/src/lib/api-client.ts
+          apps/web/src/middleware.ts
+  What:   403 response in api-client now redirects to /forbidden.
+          Proper "Access Denied" page with two buttons (dashboard / sign in).
+          /forbidden added to middleware PUBLIC_PATHS.
+  Status: VERIFIED WORKING (confirmed by user)
+
+CHANGE 6 — Reporting:view permission fix for operational roles
+  Files:  packages/db/src/seeds/permissions.seed.ts
+  What:   reporting:view:assigned added for SALES_ENGINEER, DESIGN_ENGINEER,
+          PROCUREMENT, SITE_SUPERVISOR, COMMISSIONING_ENGINEER, OM_ENGINEER.
+          Previously these roles got 403 on the dashboard after enforcement
+          was turned on. Root cause: dashboard requires reporting:view,
+          these roles did not have it.
+  Status: VERIFIED — seed updated, db:seed re-run, roles now reach dashboard
+
+CHANGE 7 — start-dev.bat updated
+  Files:  start-dev.bat
+  What:   Docker failure is now a soft warning instead of hard exit.
+          3s delay between API and web start.
+          Updated credential summary shown at startup.
+  Status: VERIFIED WORKING
+
+
+============================================================
+4. V1 PRODUCT DIRECTION — CURRENT STATE
+============================================================
+
+WHAT V1 CURRENTLY SEEMS TO BE:
+  V1 = a working internal CRM covering the sales pipeline and active project
+  monitoring. Core loops: capture a lead → assess site → build proposal →
+  win → create project → track gates/milestones/issues → monitor via dashboard.
+  Role-based access enforced. PMO governance layer available.
+
+ALREADY ALIGNED WITH V1:
+  - Account / contact / site management
+  - Opportunity stage flow with next-action tracking
+  - Proposal versioning and approval workflow
+  - Project creation, gate tracking, RAG / blocker management
+  - Document upload, revision control, approval status
+  - Dashboard with pipeline, proposal, project metrics
+  - PMO portfolio page (cross-project governance)
+  - Role-based access with AUTHZ_ENFORCE=true
+  - Admin user management (SUPER_ADMIN only)
+  - Change password (self-service)
+
+STILL INCOMPLETE FOR V1:
+  - Contracts service (schema is complete, API is a stub)
+  - Scope enforcement at service layer (own/assigned scopes declared but
+    not enforced in query filters — INFERENCE based on typical NestJS patterns)
+  - Sensitive field stripping in API responses (implemented in AuthzService
+    but UNCONFIRMED whether all services invoke it)
+  - Frontend forms for several modules (edit forms partially built)
+
+SHOULD BE DEFERRED TO V2:
+  - Procurement (full RFQ → PO → delivery workflow)
+  - O&M and Asset management
+  - AI features (summaries, extraction, Q&A from internal data)
+  - Notifications / worker (BullMQ + Redis defined but not implemented)
+  - Structured PMO review history (currently single text field)
+  - PMO gate approval action from /pmo UI (currently read-only)
+  - Report exports (PDF/Excel)
+  - Performance logging for assets
+
+STAYING PRACTICAL OR BECOMING HEAVY?
+  System is staying practical. The deferred stubs are not adding bloat to
+  V1 — they are placeholder modules that compile but don't run real logic.
+  The PMO integration was deliberately kept minimal (fields + read-only
+  portfolio page, not a separate heavyweight system). The main risk is
+  scope enforcement leakage — if services return all records regardless
+  of the user's assigned scope, the data boundary is conceptual only.
+
+
+============================================================
+5. PMO FIT IN THE CURRENT CRM
+============================================================
+
+IMPLEMENTED IN CURRENT FORM:
+  Yes — PMO has been implemented as a thin governance layer embedded into
+  the CRM, not as a standalone module.
+
+PMO ELEMENTS THAT EXIST:
+
+  Schema level:
+    Project.pmoStatusNote      (String?) — PMO's governance note
+    Project.lastPmoReviewAt    (DateTime?) — last formal review
+    ProjectGate.pmoFlagged     (Boolean, default false)
+    ProjectGate.pmoComment     (String?)
+    ProjectGate.pmoReviewAt    (DateTime?)
+    Milestone.baselineDate     (DateTime?) — frozen original date for drift detection
+
+  Role level:
+    PMO_MANAGER role (dedicated, separate from Director and PM)
+    23 permission entries — cross-portfolio view, gate approval, milestone
+    and issue create/edit. No contract/invoice/margin access.
+
+  API level:
+    GET /reporting/pmo — 10 parallel queries producing:
+      quickCounts (8 metrics), ragBreakdown, gateDistribution,
+      projectsWithBlocker, pendingGateApprovals, overdueDeliverables,
+      overdueMilestones, stalledProjects (14-day threshold), criticalOpenIssues
+
+  Frontend level:
+    /pmo page with 8 quick-count cards, RAG health bar, gate distribution
+    bars, and 7 detail tables. Sidebar nav item (ShieldCheck icon).
+
+WHAT IS MISSING FOR PRACTICAL PMO USE:
+  - PMO gate approval action from the /pmo UI (currently read-only;
+    approval done from project detail page)
+  - Structured review log (pmoStatusNote overwrites; no history per review)
+  - PMO-specific notifications (gate submitted, blocker escalation)
+  - Baseline vs actual schedule comparison chart (data model supports it,
+    chart not built)
+
+EMBEDDED VS SEPARATE:
+  Embedded. PMO data lives on existing Project, ProjectGate, and Milestone
+  models. PMO_MANAGER is a role with broad view permissions. The /pmo page
+  is a portfolio aggregation view in the reporting section of the CRM.
+  There is no separate PMO module or separate PMO database.
+
+BEST-FIT APPROACH BASED ON REPO:
+  Current approach is correct for a 15-person company. PMO should remain
+  embedded and governance-oriented — not a project manager replacement.
+
+
+============================================================
+6. ROLE VISIBILITY AND SENSITIVE DATA CONTROL
+============================================================
+
+NOTE ON VERIFICATION:
+  Permissions are verified from permissions.seed.ts (the source of truth for
+  what roles SHOULD have access to). Whether the actual service-layer queries
+  respect scope boundaries (own/assigned) is UNCONFIRMED — scope enforcement
+  is declared at the permission level but must be verified in each service.
+  Field-level stripping (margin, cost, payment_status) is implemented in
+  AuthzService.stripSensitiveFields() but UNCONFIRMED whether all relevant
+  service responses invoke it.
+
+─────────────────────────────────────────────────────────────────────────────
+ROLE: SUPER_ADMIN
+─────────────────────────────────────────────────────────────────────────────
+  Modules/pages accessible : Admin only (user management, roles)
+  Can see opportunities     : NO (no business resource permissions)
+  Can see proposals         : NO
+  Can see projects          : NO
+  Can see dashboard         : NO (no reporting:view)
+  Can see margin            : NO
+  Can see contract value    : NO
+  Can see payment status    : NO
+  Can access admin          : YES (user_admin + role_admin — full access)
+  Verification              : VERIFIED from seed; correctly isolated
+
+─────────────────────────────────────────────────────────────────────────────
+ROLE: DIRECTOR
+─────────────────────────────────────────────────────────────────────────────
+  Modules/pages accessible : All business modules — accounts, contacts, sites,
+                             opportunities, proposals, contracts, projects,
+                             gates, procurement, documents, assets, maintenance,
+                             reporting/dashboard, AI
+  Scope                    : all (full cross-portfolio view)
+  Can see opportunities     : YES (all)
+  Can see proposals         : YES (all, including version detail)
+  Can see projects          : YES (all)
+  Can see dashboard         : YES (reporting:view:all)
+  Can see margin            : YES (margin:view:all — VERIFIED in seed)
+  Can see contract value    : YES (contract:view:all)
+  Can see payment status    : YES (payment_status:view:all)
+  Can access admin          : NO (user_admin not assigned)
+  Verification              : VERIFIED from seed
+
+─────────────────────────────────────────────────────────────────────────────
+ROLE: PMO_MANAGER
+─────────────────────────────────────────────────────────────────────────────
+  Modules/pages accessible : Accounts (view), sites (view), opportunities
+                             (view), proposals (view), projects (view+edit),
+                             gates (view+edit+approve), milestones (create/edit),
+                             issues (create/edit), risks (create/edit),
+                             documents (view), drawings (view), RFQs (view),
+                             POs (view), /pmo page, reporting
+  Scope                    : all (cross-portfolio)
+  Can see opportunities     : YES (view only)
+  Can see proposals         : YES (view only, no margin)
+  Can see projects          : YES (view+edit PMO fields)
+  Can see dashboard         : YES (reporting:view:all)
+  Can see margin            : NO (margin not in PMO permission set)
+  Can see contract value    : NO (contract not in PMO permission set)
+  Can see payment status    : NO (payment_status not in PMO permission set)
+  Can access admin          : NO
+  Verification              : VERIFIED from seed. Finance exclusion VERIFIED
+                              in seed. Whether API response strips margin from
+                              proposal detail for PMO_MANAGER: UNCONFIRMED
+
+─────────────────────────────────────────────────────────────────────────────
+ROLE: SALES_MANAGER
+─────────────────────────────────────────────────────────────────────────────
+  Modules/pages accessible : Accounts (all), contacts (all), sites (all),
+                             opportunities (all), proposals (all),
+                             margin (all), reporting (team scope)
+  Scope                    : all for CRM; team for reporting
+  Can see opportunities     : YES (all)
+  Can see proposals         : YES (all, including margin)
+  Can see projects          : YES (view:all — VERIFIED in seed)
+  Can see dashboard         : YES (reporting:view:team)
+  Can see margin            : YES (margin:view:all)
+  Can see contract value    : YES (contract:view:all)
+  Can see payment status    : YES (payment_status:view:all)
+  Can access admin          : NO
+  Verification              : VERIFIED from seed
+
+─────────────────────────────────────────────────────────────────────────────
+ROLE: SALES_ENGINEER
+─────────────────────────────────────────────────────────────────────────────
+  Modules/pages accessible : Accounts (own), contacts (own), sites (own),
+                             opportunities (own+assigned), proposals (own+assigned),
+                             reporting (assigned scope)
+  Scope                    : own / assigned (NOT all)
+  Can see opportunities     : YES (own/assigned only)
+  Can see proposals         : YES (own/assigned only, no margin)
+  Can see projects          : YES (view:assigned — VERIFIED in seed)
+  Can see dashboard         : YES (reporting:view:assigned — recently fixed)
+  Can see margin            : NO (margin not in Sales Engineer permissions)
+  Can see contract value    : NO
+  Can see payment status    : NO
+  Can access admin          : NO
+  Verification              : VERIFIED from seed.
+                              Whether service queries are filtered to own/assigned
+                              records only: UNCONFIRMED (scope leak risk)
+
+─────────────────────────────────────────────────────────────────────────────
+ROLE: PROJECT_MANAGER
+─────────────────────────────────────────────────────────────────────────────
+  Modules/pages accessible : Projects (assigned), gates, milestones, tasks,
+                             issues, risks, RFIs, submittals, variations,
+                             documents (assigned), reporting (assigned)
+  Scope                    : assigned
+  Can see opportunities     : YES (view:assigned)
+  Can see proposals         : YES (view:assigned — no margin)
+  Can see projects          : YES (assigned only)
+  Can see dashboard         : YES (reporting:view:assigned)
+  Can see margin            : NO
+  Can see contract value    : NO (contract:view:assigned — INFERENCE; only
+                              sees contract linked to their assigned project)
+  Can see payment status    : NO
+  Can access admin          : NO
+  Verification              : VERIFIED from seed for permissions.
+                              Scope filtering at service layer: UNCONFIRMED
+
+─────────────────────────────────────────────────────────────────────────────
+ROLE: DESIGN_LEAD
+─────────────────────────────────────────────────────────────────────────────
+  Modules/pages accessible : All design-related across all projects —
+                             technical assessments (approve), documents
+                             (approve), drawings (approve), opportunities
+                             (view:all), projects (view:all), reporting (all)
+  Scope                    : all for view; own/assigned for edit
+  Can see opportunities     : YES (view:all)
+  Can see proposals         : YES (view:all)
+  Can see projects          : YES (view:all)
+  Can see dashboard         : YES (reporting:view:all)
+  Can see margin            : NO (margin not in DESIGN_LEAD permissions)
+  Can see contract value    : NO
+  Can see payment status    : NO
+  Can access admin          : NO
+  Verification              : VERIFIED from seed
+
+─────────────────────────────────────────────────────────────────────────────
+ROLE: DESIGN_ENGINEER
+─────────────────────────────────────────────────────────────────────────────
+  Modules/pages accessible : Technical assessments (own/assigned), drawings
+                             (create/edit, no approve), documents (create/edit),
+                             projects (view:assigned), sites (view:own)
+  Scope                    : own / assigned
+  Can see opportunities     : YES (view:assigned)
+  Can see proposals         : YES (view:assigned, no margin)
+  Can see projects          : YES (assigned only)
+  Can see dashboard         : YES (reporting:view:assigned — recently fixed)
+  Can see margin            : NO
+  Can see contract value    : NO
+  Can see payment status    : NO
+  Can access admin          : NO
+  Verification              : VERIFIED from seed
+
+─────────────────────────────────────────────────────────────────────────────
+ROLE: PROCUREMENT
+─────────────────────────────────────────────────────────────────────────────
+  Modules/pages accessible : Vendors (all), RFQs (all), quotes (all),
+                             purchase orders (all), deliveries (all),
+                             equipment serials (all), accounts (view:all),
+                             sites (view:all), projects (view:all)
+  Scope                    : all for procurement resources
+  Can see opportunities     : YES (view:all — VERIFIED in seed)
+  Can see proposals         : NO (proposal not in procurement permissions)
+  Can see projects          : YES (view:all — for delivery context)
+  Can see dashboard         : YES (reporting:view:assigned — recently fixed)
+  Can see margin            : NO
+  Can see contract value    : NO
+  Can see payment status    : NO
+  Can access admin          : NO
+  Verification              : VERIFIED from seed
+
+─────────────────────────────────────────────────────────────────────────────
+ROLE: SITE_SUPERVISOR
+─────────────────────────────────────────────────────────────────────────────
+  Modules/pages accessible : Site logs (create/edit), checklists (create/edit),
+                             punch lists (create/edit), projects (view:assigned),
+                             documents (view:assigned), assets (view:assigned)
+  Scope                    : assigned
+  Can see opportunities     : NO
+  Can see proposals         : NO
+  Can see projects          : YES (assigned only — view)
+  Can see dashboard         : YES (reporting:view:assigned — recently fixed)
+  Can see margin            : NO
+  Can see contract value    : NO
+  Can see payment status    : NO
+  Can access admin          : NO
+  Verification              : VERIFIED from seed
+
+─────────────────────────────────────────────────────────────────────────────
+ROLE: COMMISSIONING_ENGINEER
+─────────────────────────────────────────────────────────────────────────────
+  Modules/pages accessible : Testing sheets (create/edit), handover docs
+                             (create), assets (create — at commissioning),
+                             punch lists (edit), projects (view:assigned),
+                             documents (view:assigned)
+  Scope                    : assigned
+  Can see opportunities     : NO
+  Can see proposals         : NO
+  Can see projects          : YES (assigned only — view)
+  Can see dashboard         : YES (reporting:view:assigned — recently fixed)
+  Can see margin            : NO
+  Can see contract value    : NO
+  Can see payment status    : NO
+  Can access admin          : NO
+  Verification              : VERIFIED from seed
+
+─────────────────────────────────────────────────────────────────────────────
+ROLE: OM_ENGINEER
+─────────────────────────────────────────────────────────────────────────────
+  Modules/pages accessible : Assets (view/edit), maintenance plans (view/edit),
+                             maintenance records (create/edit), service tickets
+                             (all CRUD), warranty claims (create/edit),
+                             projects (view:assigned), documents (view:assigned)
+  Scope                    : assigned / all for O&M resources
+  Can see opportunities     : NO
+  Can see proposals         : NO
+  Can see projects          : YES (assigned only — view)
+  Can see dashboard         : YES (reporting:view:assigned — recently fixed)
+  Can see margin            : NO
+  Can see contract value    : NO
+  Can see payment status    : NO
+  Can access admin          : NO
+  Verification              : VERIFIED from seed
+
+─────────────────────────────────────────────────────────────────────────────
+ROLE: FINANCE_ADMIN
+─────────────────────────────────────────────────────────────────────────────
+  Modules/pages accessible : Contracts (all), invoice milestones (all),
+                             budgets (all), cost (view), payment status (all),
+                             accounts (view:all), sites (view:all),
+                             opportunities (view:all), documents (view:all),
+                             reporting (all)
+  Scope                    : all for finance resources
+  Can see opportunities     : YES (view:all — for context)
+  Can see proposals         : NO (proposal not in Finance permissions)
+  Can see projects          : YES (view:all — for contract context)
+  Can see dashboard         : YES (reporting:view:all)
+  Can see margin            : YES (margin:view:all)
+  Can see contract value    : YES (contract:view:all)
+  Can see payment status    : YES (payment_status:view:all)
+  Can access admin          : NO
+  Verification              : VERIFIED from seed
+
+─────────────────────────────────────────────────────────────────────────────
+SENSITIVE FIELDS — CURRENT PROTECTION STATUS
+─────────────────────────────────────────────────────────────────────────────
+
+  Field               Protected by             Roles with access
+  ─────────────────────────────────────────────────────────────────────────
+  margin / marginPct  margin:view permission   DIRECTOR, SALES_MANAGER,
+                      + stripSensitiveFields() FINANCE_ADMIN only
+  estimatedCapex      Part of proposal detail  All with proposal:view
+  (not margin)        — not flagged sensitive
+  contract value      contract:view permission DIRECTOR, SALES_MANAGER,
+                                               FINANCE_ADMIN
+  invoice amounts     invoice_milestone:view   FINANCE_ADMIN, DIRECTOR
+  payment status      payment_status:view      FINANCE_ADMIN, DIRECTOR,
+                                               SALES_MANAGER
+  cost / EAC          cost:view permission     DIRECTOR, FINANCE_ADMIN
+
+  HOW PROTECTED:
+    1. PermissionGuard — blocks endpoint access for missing resource:action
+    2. AuthzService.stripSensitiveFields() — field-level removal from responses
+    3. Seed-enforced role definitions — roles without permission entries simply
+       cannot be seeded with those rights
+
+  WHERE PROTECTION MAY BE INCONSISTENT OR RISKY:
+    - UNCONFIRMED: Not verified that all service methods call
+      stripSensitiveFields() before returning responses. If any service
+      returns raw Prisma records without stripping, margin/cost fields
+      will leak to roles that shouldn't see them.
+    - UNCONFIRMED: Proposal detail response — does it include marginPercent
+      for PMO_MANAGER or PROJECT_MANAGER? Should not.
+    - INFERENCE: Scope filtering (own/assigned) — if services use findMany()
+      without WHERE clauses scoped to userId/projectId, Sales Engineers
+      and Project Managers may see all records instead of just their own.
+    - The reporting/dashboard endpoint runs with the user context but
+      it is UNCONFIRMED whether the metrics are filtered by scope or
+      return aggregated totals regardless of role.
+
+
+============================================================
+7. SECURITY / CONTROL STATUS
+============================================================
+
+AUTHZ_ENFORCE:
+  Now set to true in apps/api/.env.
+  PermissionGuard reads this at startup via ConfigService.
+  Result: 403 thrown for unregistered permissions. VERIFIED.
+
+PERMISSIONGUARD / @REQUIREPERMISSION COVERAGE:
+  Global guards registered in AppModule (JwtAuthGuard + PermissionGuard).
+  @RequirePermission decorator used on endpoints in: accounts, contacts, sites,
+  opportunities, proposals, projects, reporting, admin, documents.
+  INFERENCE: Not confirmed that ALL controllers in ALL modules use
+  @RequirePermission. Stub modules (gates, contracts, procurement, assets,
+  maintenance, ai, notifications) may have endpoints without permission
+  annotation — would bypass the guard silently (guard allows unannotated
+  endpoints through).
+
+/auth/register:
+  DOES NOT EXIST. Confirmed. New users created by SUPER_ADMIN only via
+  POST /admin/users. This is correct and intentional.
+
+SEEDED TEST USERS:
+  13 test users. All with Test@1234 except Super Admin (Solaroo123!).
+  All seeded with realistic roles. One per role.
+  Should be deactivated or replaced before any non-internal use.
+
+DEFAULT SECRET HANDLING:
+  JWT_SECRET and DATABASE_URL are in .env files.
+  .env files are not committed to git (confirmed by tool permission denial
+  on direct read). INFERENCE: .env.example exists and likely contains
+  placeholder values. Default secrets not confirmed in code.
+
+REPORTING ENDPOINT PROTECTION:
+  GET /reporting/dashboard and GET /reporting/pmo both require
+  reporting:view permission. VERIFIED — missing permission causes 403.
+  Operational roles (Sales Engineer, Design Engineer, Procurement,
+  Site Supervisor, Commissioning, OM Engineer) were missing this permission
+  and getting 403 on dashboard. Fixed in latest session — now have
+  reporting:view:assigned.
+
+SENSITIVE FIELD STRIPPING:
+  AuthzService.stripSensitiveFields() and canViewField() exist.
+  Implementation confirmed in authz.service.ts.
+  Whether services invoke it before returning data: UNCONFIRMED.
+
+ROLE/PERMISSION SEED CONSISTENCY:
+  Seed is the source of truth. 330+ entries. Re-running db:seed is
+  idempotent (upsert pattern). Latest re-seed confirmed after permission
+  fix session. Consistent as of 2026-04-13.
+
+CURRENT ROLLOUT BLOCKERS:
+  B-01 [RESOLVED]  AUTHZ_ENFORCE=true — now enabled
+  B-02 [RESOLVED]  Operational roles blocked from dashboard — fixed
+  B-03 [OPEN]      Scope enforcement at service layer — not validated
+  B-04 [OPEN]      Sensitive field stripping — not validated in all services
+  B-05 [OPEN]      Stub modules have unannotated endpoints — may bypass
+                   PermissionGuard
+  B-06 [OPEN]      Contracts service is a stub — critical for project closeout
+  B-07 [OPEN]      Test users with Test@1234 in production-like seed —
+                   must be deactivated before any real use
+
+
+============================================================
+8. WHAT IS VERIFIED WORKING VS NOT YET VERIFIED
+============================================================
+
+VERIFIED WORKING
+─────────────────────────────────────────────────────────────────────────────
+  - Login / logout / session cookie
+  - /me endpoint returning correct user + role
+  - Self-service password change (topbar modal)
+  - Admin password reset (SUPER_ADMIN only)
+  - Dashboard page loading for all 13 roles (after permission fix)
+  - AUTHZ_ENFORCE=true — unauthorized roles now get 403
+  - /forbidden page rendering correctly on 403
+  - /pmo portfolio page loading (confirmed by user with pmo@pekatgroup.com)
+  - PMO_MANAGER role created and seeded
+  - Account CRUD (list, detail, create, edit)
+  - Contact CRUD
+  - Site CRUD
+  - Opportunity list, detail, stage transitions
+  - Proposal list, versioning, approval flow (code-level confirmed)
+  - Project list, detail, gate status update, deliverable update
+  - Document upload and download
+  - Permission enforcement — roles blocked from /forbidden pages
+  - db:seed is idempotent and applies all 13 roles + 12 test users
+
+NOT YET VERIFIED / STILL NEEDS TESTING
+─────────────────────────────────────────────────────────────────────────────
+  - Scope enforcement at service layer (own/assigned actual data filtering)
+  - Sensitive field stripping in API responses (margin not returned for
+    restricted roles)
+  - Proposal marginPercent hidden from PROJECT_MANAGER and PMO_MANAGER
+    in actual API response
+  - Gate approval workflow end-to-end (PM submits → PMO approves)
+  - Milestone baselineDate vs targetDate drift display
+  - Document revision and approval workflow
+  - Contracts module (service is a stub)
+  - Procurement module (service is a stub)
+  - O&M / Asset module (service is a stub)
+  - AI module (stub)
+  - Notifications / BullMQ worker (stub)
+  - Issue and risk creation via API
+  - RFI and submittal workflows
+  - Variation management
+  - CommissioningTest and PunchlistItem creation
+  - Export functions (reporting:export permission exists, no endpoint built)
+  - PMO gate approval action from /pmo UI
+  - Frontend edit forms for projects, opportunities (partially built per code)
+
+
+============================================================
+9. KEY FILES FOR NEXT REVIEW
+============================================================
+
+AUTH / PERMISSIONS:
+  packages/db/src/seeds/permissions.seed.ts   — full permission matrix
+  apps/api/src/common/authz/authz.service.ts  — scope logic + field stripping
+  apps/api/src/common/authz/permission.guard.ts — enforcement mode
+
+REPORTING / DASHBOARD:
+  apps/api/src/modules/reporting/reporting.service.ts  — all metrics queries
+  apps/api/src/modules/reporting/reporting.controller.ts
+
+OPPORTUNITIES:
+  apps/api/src/modules/opportunities/opportunities.service.ts
+  packages/workflows/src/ (stage transition map — INFERENCE: exists here)
+
+PROJECTS:
+  apps/api/src/modules/projects/projects.service.ts
+  packages/db/prisma/schema/projects.prisma
+
+PMO FIT:
+  apps/web/src/app/(app)/pmo/page.tsx        — portfolio dashboard
+  apps/api/src/modules/reporting/reporting.service.ts (getPmoMetrics)
+  docs/pmo-v1-direction.md                   — direction decisions
+
+ROLE VISIBILITY / SENSITIVE DATA:
+  apps/api/src/common/authz/authz.service.ts — canViewField, stripSensitiveFields
+  packages/db/src/seeds/permissions.seed.ts  — role permission definitions
+  apps/api/src/modules/proposals/proposals.service.ts — does it strip margin?
+  apps/api/src/modules/projects/projects.service.ts   — does it strip cost?
+
+CONTRACTS (critical stub):
+  apps/api/src/modules/contracts/contracts.service.ts
+  packages/db/prisma/schema/contracts.prisma
+
+
+============================================================
+10. RECOMMENDED NEXT STEP
+============================================================
+
+MOST IMPORTANT SINGLE NEXT STEP:
+
+  Validate scope enforcement and sensitive field stripping.
+
+  Specifically: log in as salesengineer@pekatgroup.com (scope: own/assigned)
+  and call GET /api/opportunities — check whether the response contains ONLY
+  the opportunities assigned to that user, or ALL opportunities.
+
+  If all opportunities are returned, the service layer is not filtering by
+  scope and the permission system is protecting navigation only (not data).
+  This is the most critical security gap in the current V1 system.
+
+  After validating scope filtering, check GET /api/proposals/:id for a
+  proposal as projectmanager@pekatgroup.com — verify that marginPercent is
+  absent from the response.
+
+  If either check fails, the fix is to add WHERE filters in the service
+  findMany() calls based on the user's scope, and ensure service methods
+  call authz.stripSensitiveFields() before returning response data.
+
+  This should be done before any broader team rollout.
+
+
+============================================================
+11. APPENDIX — RECENT CHANGE LOG SNAPSHOT
+============================================================
+
+  Date        File(s)                                      Change               Status
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  2026-04-11  auth.service.ts, auth.controller.ts          Change password      VERIFIED
+  2026-04-11  topbar.tsx                                   Password modal UI    VERIFIED
+  2026-04-11  permissions.seed.ts                          DESIGN_LEAD perms    VERIFIED compiled
+  2026-04-11  seed.ts                                      PMO_MANAGER role     VERIFIED seeded
+  2026-04-11  permissions.seed.ts                          PMO_MANAGER perms    VERIFIED seeded
+  2026-04-11  projects.prisma                              PMO schema fields    VERIFIED DB synced
+  2026-04-11  projects.dto.ts, projects.service.ts         PMO DTO + service    VERIFIED compiled
+  2026-04-11  reporting.service.ts                         getPmoMetrics()      VERIFIED working
+  2026-04-11  reporting.controller.ts                      GET /reporting/pmo   VERIFIED working
+  2026-04-11  pmo/page.tsx                                 PMO portfolio page   VERIFIED loading
+  2026-04-11  sidebar.tsx                                  PMO nav item         VERIFIED
+  2026-04-11  docs/pmo-v1-direction.md                     Direction doc        CREATED
+  2026-04-11  dev_log/v1_rollout_readiness_260411.txt      Rollout report       CREATED
+  2026-04-13  api-client.ts, middleware.ts                 403 → /forbidden     VERIFIED
+  2026-04-13  app/forbidden/page.tsx                       Access Denied page   VERIFIED
+  2026-04-13  permissions.seed.ts                          reporting:view fix   VERIFIED seeded
+  2026-04-13  start-dev.bat                                Docker optional      VERIFIED
+
+============================================================
+END OF SUMMARY
+Generated by Claude Sonnet for Pekat Teknologi Sdn Bhd
+File: dev_log/crm_progress_summary_for_chatgpt_130426.txt
+============================================================

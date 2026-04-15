@@ -1,0 +1,70 @@
+// audit.prisma — audit logs, notifications, saved views, tags
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  resource    String   // e.g. "opportunity", "proposal_version", "project_gate"
+  resourceId  String
+  action      String   // e.g. "created", "stage_changed", "approved", "rejected", "updated"
+  field       String?  // specific field changed if applicable
+  oldValue    String?
+  newValue    String?
+  metadata    Json?    // extra context
+  performedAt DateTime @default(now())
+
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@index([resource, resourceId])
+  @@index([userId])
+  @@index([performedAt])
+  @@map("audit_logs")
+}
+
+enum NotificationStatus {
+  UNREAD
+  READ
+  DISMISSED
+}
+
+model Notification {
+  id          String             @id @default(cuid())
+  userId      String
+  title       String
+  body        String?
+  type        String             // e.g. "approval_required", "gate_overdue", "task_due"
+  status      NotificationStatus @default(UNREAD)
+  linkUrl     String?
+  resourceId  String?
+  resource    String?
+  createdAt   DateTime           @default(now())
+  readAt      DateTime?
+
+  user        User               @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+  @@map("notifications")
+}
+
+model SavedView {
+  id          String   @id @default(cuid())
+  userId      String
+  module      String   // e.g. "opportunities", "projects"
+  name        String
+  filters     Json
+  columns     Json?
+  sortBy      String?
+  sortDir     String?
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@map("saved_views")
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  color     String?
+  createdAt DateTime @default(now())
+
+  @@map("tags")
+}
