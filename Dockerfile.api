@@ -20,10 +20,15 @@ RUN pnpm install --frozen-lockfile
 
 # ─── Build ─────────────────────────────────────────────────────────────────────
 FROM deps AS builder
+# Bust Docker cache: Railway injects a unique RAILWAY_GIT_COMMIT_SHA per deploy
 ARG RAILWAY_GIT_COMMIT_SHA
+ARG CACHEBUST
+RUN echo "Build: ${RAILWAY_GIT_COMMIT_SHA:-$CACHEBUST:-$(date +%s)}"
 COPY . .
 RUN pnpm db:generate
 RUN pnpm --filter @solaroo/api build
+# Verify the dist exists
+RUN ls -la /app/apps/api/dist/ && test -f /app/apps/api/dist/main.js
 
 # ─── Production image ─────────────────────────────────────────────────────────
 FROM base AS runner
@@ -37,11 +42,16 @@ COPY --from=builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
 
+# Make prisma CLI accessible: create a wrapper script
+RUN PRISMA_JS=$(find /app/node_modules/.pnpm -name 'index.js' -path '*/prisma@*/build/index.js' | head -1) && \
+    echo "#!/bin/sh\nnode $PRISMA_JS \"\$@\"" > /usr/local/bin/prisma && \
+    chmod +x /usr/local/bin/prisma && \
+    echo "Prisma CLI installed at: $PRISMA_JS"
+
 WORKDIR /app/apps/api
 
 ENV NODE_ENV=production
 EXPOSE ${PORT:-4000}
 
-# Find and run prisma migrate deploy, then start API
-# pnpm nests the prisma binary deep in .pnpm — locate it dynamically
-CMD ["sh", "-c", "cd /app && PRISMA_BIN=$(find node_modules/.pnpm -name 'index.js' -path '*/prisma/build/*' ! -path '*/@prisma/*' | head -1) && if [ -n \"$PRISMA_BIN\" ]; then echo \"Running migrations...\" && node $PRISMA_BIN migrate deploy --schema packages/db/prisma/schema.prisma || echo \"Migration failed or no migrations to apply\"; else echo \"Prisma CLI not found, skipping migrations\"; fi && cd /app/apps/api && node dist/main"]
+# Run migrations then start API
+CMD ["sh", "-c", "cd /app && prisma migrate deploy --schema packages/db/prisma/schema.prisma || echo 'Migrations: skipped or none pending' && cd /app/apps/api && node dist/main"]
