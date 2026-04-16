@@ -1,0 +1,39 @@
+FROM node:20-slim AS base
+RUN corepack enable && corepack prepare pnpm@9 --activate
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+
+# ─── Install dependencies ─────────────────────────────────────────────────────
+FROM base AS deps
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY packages/types/package.json packages/types/package.json
+COPY packages/ui/package.json packages/ui/package.json
+COPY packages/config/package.json packages/config/package.json
+COPY packages/workflows/package.json packages/workflows/package.json
+COPY packages/documents/package.json packages/documents/package.json
+COPY packages/ai-prompts/package.json packages/ai-prompts/package.json
+COPY services/worker/package.json services/worker/package.json
+RUN pnpm install --frozen-lockfile
+
+# ─── Build ─────────────────────────────────────────────────────────────────────
+FROM deps AS builder
+COPY . .
+RUN pnpm db:generate
+RUN pnpm --filter @solaroo/api build
+
+# ─── Production image ─────────────────────────────────────────────────────────
+FROM base AS runner
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
+COPY --from=builder /app/apps/api/dist ./apps/api/dist
+COPY --from=builder /app/packages ./packages
+COPY --from=builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
+
+WORKDIR /app/apps/api
+EXPOSE ${PORT:-4000}
+CMD ["sh", "-c", "npx prisma migrate deploy --schema ../../packages/db/prisma/schema.prisma && node dist/main"]

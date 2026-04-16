@@ -1,0 +1,10 @@
+node_modules
+.next
+dist
+.git
+.tmp
+.claude
+*.md
+dev_log
+docs
+.env*

@@ -1,0 +1,39 @@
+FROM node:20-slim AS base
+RUN corepack enable && corepack prepare pnpm@9 --activate
+WORKDIR /app
+
+# ─── Install dependencies ─────────────────────────────────────────────────────
+FROM base AS deps
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY packages/types/package.json packages/types/package.json
+COPY packages/ui/package.json packages/ui/package.json
+COPY packages/config/package.json packages/config/package.json
+COPY packages/workflows/package.json packages/workflows/package.json
+COPY packages/documents/package.json packages/documents/package.json
+COPY packages/ai-prompts/package.json packages/ai-prompts/package.json
+COPY services/worker/package.json services/worker/package.json
+RUN pnpm install --frozen-lockfile
+
+# ─── Build ─────────────────────────────────────────────────────────────────────
+FROM deps AS builder
+COPY . .
+ENV NEXT_TELEMETRY_DISABLED=1
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+RUN pnpm --filter @solaroo/web build
+
+# ─── Production image ─────────────────────────────────────────────────────────
+FROM base AS runner
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY --from=builder /app/apps/web/.next/standalone ./
+COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=builder /app/apps/web/public ./apps/web/public
+
+WORKDIR /app/apps/web
+EXPOSE ${PORT:-3000}
+CMD ["node", "server.js"]
