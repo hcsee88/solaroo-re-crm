@@ -33,10 +33,13 @@ export class AuthController {
     const result = this.authService.login(user);
 
     // Set httpOnly cookie for browser clients
+    // In production, API and Web are on different subdomains so we need
+    // sameSite: "none" (+ secure: true) for cross-origin cookie delivery
+    const isProduction = process.env.NODE_ENV === "production";
     reply.setCookie("session", result.accessToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
       path: "/",
       maxAge: 8 * 60 * 60, // 8 hours
     });
@@ -47,7 +50,12 @@ export class AuthController {
   @Post("logout")
   @HttpCode(HttpStatus.OK)
   async logout(@Res({ passthrough: true }) reply: FastifyReply) {
-    reply.clearCookie("session", { path: "/" });
+    const isProduction = process.env.NODE_ENV === "production";
+    reply.clearCookie("session", {
+      path: "/",
+      secure: isProduction,
+      sameSite: isProduction ? "none" : "lax",
+    });
     return { message: "Logged out" };
   }
 
