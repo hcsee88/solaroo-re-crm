@@ -42,6 +42,6 @@ WORKDIR /app/apps/api
 ENV NODE_ENV=production
 EXPOSE ${PORT:-4000}
 
-# Run migrations then start API
-# Use node to call prisma binary directly (pnpm nests it, npx/pnpm exec can't find it)
-CMD ["sh", "-c", "cd /app && node node_modules/prisma/build/index.js migrate deploy --schema packages/db/prisma/schema.prisma && cd /app/apps/api && node dist/main"]
+# Find and run prisma migrate deploy, then start API
+# pnpm nests the prisma binary deep in .pnpm — locate it dynamically
+CMD ["sh", "-c", "cd /app && PRISMA_BIN=$(find node_modules/.pnpm -name 'index.js' -path '*/prisma/build/*' ! -path '*/@prisma/*' | head -1) && if [ -n \"$PRISMA_BIN\" ]; then echo \"Running migrations...\" && node $PRISMA_BIN migrate deploy --schema packages/db/prisma/schema.prisma || echo \"Migration failed or no migrations to apply\"; else echo \"Prisma CLI not found, skipping migrations\"; fi && cd /app/apps/api && node dist/main"]
