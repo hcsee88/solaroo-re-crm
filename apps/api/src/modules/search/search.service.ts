@@ -299,10 +299,10 @@ export class SearchService {
           scopeFilter,
           {
             OR: [
-              { name: { contains: q, mode: 'insensitive' } },
-              { accountCode: { contains: q, mode: 'insensitive' } },
-              { industry: { contains: q, mode: 'insensitive' } },
-              { region: { contains: q, mode: 'insensitive' } },
+              { name: { contains: q, mode: 'insensitive' as const } },
+              { accountCode: { contains: q, mode: 'insensitive' as const } },
+              { industry: { contains: q, mode: 'insensitive' as const } },
+              { region: { contains: q, mode: 'insensitive' as const } },
             ],
           },
         ],
@@ -334,11 +334,11 @@ export class SearchService {
           scopeFilter,
           {
             OR: [
-              { firstName: { contains: q, mode: 'insensitive' } },
-              { lastName: { contains: q, mode: 'insensitive' } },
-              { email: { contains: q, mode: 'insensitive' } },
-              { jobTitle: { contains: q, mode: 'insensitive' } },
-              { phone: { contains: q, mode: 'insensitive' } },
+              { firstName: { contains: q, mode: 'insensitive' as const } },
+              { lastName: { contains: q, mode: 'insensitive' as const } },
+              { email: { contains: q, mode: 'insensitive' as const } },
+              { jobTitle: { contains: q, mode: 'insensitive' as const } },
+              { phone: { contains: q, mode: 'insensitive' as const } },
             ],
           },
         ],
@@ -386,10 +386,10 @@ export class SearchService {
           scopeFilter,
           {
             OR: [
-              { name: { contains: q, mode: 'insensitive' } },
-              { siteCode: { contains: q, mode: 'insensitive' } },
-              { address: { contains: q, mode: 'insensitive' } },
-              { region: { contains: q, mode: 'insensitive' } },
+              { name: { contains: q, mode: 'insensitive' as const } },
+              { siteCode: { contains: q, mode: 'insensitive' as const } },
+              { address: { contains: q, mode: 'insensitive' as const } },
+              { region: { contains: q, mode: 'insensitive' as const } },
             ],
           },
         ],
@@ -436,10 +436,10 @@ export class SearchService {
           scopeFilter,
           {
             OR: [
-              { title: { contains: q, mode: 'insensitive' } },
-              { opportunityCode: { contains: q, mode: 'insensitive' } },
-              { summary: { contains: q, mode: 'insensitive' } },
-              { account: { name: { contains: q, mode: 'insensitive' } } },
+              { title: { contains: q, mode: 'insensitive' as const } },
+              { opportunityCode: { contains: q, mode: 'insensitive' as const } },
+              { summary: { contains: q, mode: 'insensitive' as const } },
+              { account: { name: { contains: q, mode: 'insensitive' as const } } },
             ],
           },
         ],
@@ -493,9 +493,9 @@ export class SearchService {
           scopeFilter,
           {
             OR: [
-              { title: { contains: q, mode: 'insensitive' } },
-              { proposalCode: { contains: q, mode: 'insensitive' } },
-              { opportunity: { account: { name: { contains: q, mode: 'insensitive' } } } },
+              { title: { contains: q, mode: 'insensitive' as const } },
+              { proposalCode: { contains: q, mode: 'insensitive' as const } },
+              { opportunity: { account: { name: { contains: q, mode: 'insensitive' as const } } } },
             ],
           },
         ],
@@ -560,9 +560,9 @@ export class SearchService {
           scopeFilter,
           {
             OR: [
-              { name: { contains: q, mode: 'insensitive' } },
-              { projectCode: { contains: q, mode: 'insensitive' } },
-              { account: { name: { contains: q, mode: 'insensitive' } } },
+              { name: { contains: q, mode: 'insensitive' as const } },
+              { projectCode: { contains: q, mode: 'insensitive' as const } },
+              { account: { name: { contains: q, mode: 'insensitive' as const } } },
             ],
           },
         ],
