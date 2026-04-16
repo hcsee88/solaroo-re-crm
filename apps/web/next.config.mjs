@@ -19,6 +19,17 @@ const nextConfig = {
       },
     ],
   },
+  // Proxy /api/* requests to the NestJS API so that auth cookies are set on
+  // the same domain as the frontend (required for httpOnly cookie auth).
+  async rewrites() {
+    const apiUrl = process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${apiUrl}/api/:path*`,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

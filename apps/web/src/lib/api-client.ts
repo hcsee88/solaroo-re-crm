@@ -1,10 +1,13 @@
 import axios from "axios";
 import type { ApiResponse } from "@solaroo/types";
 
+// API calls go through Next.js rewrites (/api/* → NestJS API) so that
+// auth cookies are set on the same domain as the frontend.
+// NEXT_PUBLIC_API_URL is kept as a fallback for non-browser contexts only.
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 export const apiClient = axios.create({
-  baseURL: `${API_BASE_URL}/api`,
+  baseURL: typeof window !== "undefined" ? "/api" : `${API_BASE_URL}/api`,
   headers: {
     "Content-Type": "application/json",
   },
