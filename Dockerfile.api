@@ -53,5 +53,5 @@ WORKDIR /app/apps/api
 ENV NODE_ENV=production
 EXPOSE ${PORT:-4000}
 
-# Run migrations then start API
-CMD ["sh", "-c", "cd /app && prisma migrate deploy --schema packages/db/prisma/schema || echo 'Migrations: skipped or none pending' && cd /app/apps/api && node dist/main"]
+# Run migrations, seed if needed, then start API
+CMD ["sh", "-c", "cd /app && prisma migrate deploy --schema packages/db/prisma/schema || echo 'Migrations: skipped or none pending' && cd /app/packages/db && npx tsx src/seed.ts 2>&1 || echo 'Seed: skipped or already done' && cd /app/apps/api && node dist/main"]
