@@ -27,8 +27,8 @@ RUN echo "Build: ${RAILWAY_GIT_COMMIT_SHA:-$CACHEBUST:-$(date +%s)}"
 COPY . .
 RUN pnpm db:generate
 RUN pnpm --filter @solaroo/api build
-# Verify the dist exists
-RUN ls -la /app/apps/api/dist/ && test -f /app/apps/api/dist/main.js
+# Verify the dist exists (nest build outputs to dist/apps/api/src/ due to monorepo include paths)
+RUN ls -la /app/apps/api/dist/apps/api/src/ && test -f /app/apps/api/dist/apps/api/src/main.js
 
 # ─── Production image ─────────────────────────────────────────────────────────
 FROM base AS runner
@@ -54,4 +54,4 @@ ENV NODE_ENV=production
 EXPOSE ${PORT:-4000}
 
 # Run migrations then start API
-CMD ["sh", "-c", "cd /app && prisma migrate deploy --schema packages/db/prisma/schema.prisma || echo 'Migrations: skipped or none pending' && cd /app/apps/api && node dist/main"]
+CMD ["sh", "-c", "cd /app && prisma migrate deploy --schema packages/db/prisma/schema.prisma || echo 'Migrations: skipped or none pending' && cd /app/apps/api && node dist/apps/api/src/main"]
