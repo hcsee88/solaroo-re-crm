@@ -42,5 +42,6 @@ WORKDIR /app/apps/api
 ENV NODE_ENV=production
 EXPOSE ${PORT:-4000}
 
-# Run migrations then start API (use pnpm exec since pnpm is in base image)
-CMD ["sh", "-c", "cd /app && pnpm exec prisma migrate deploy --schema packages/db/prisma/schema.prisma && cd /app/apps/api && node dist/main"]
+# Run migrations then start API
+# Use node to call prisma binary directly (pnpm nests it, npx/pnpm exec can't find it)
+CMD ["sh", "-c", "cd /app && node node_modules/prisma/build/index.js migrate deploy --schema packages/db/prisma/schema.prisma && cd /app/apps/api && node dist/main"]
