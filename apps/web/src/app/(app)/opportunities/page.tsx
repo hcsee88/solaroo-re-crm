@@ -1,7 +1,8 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { useEffect, useState, useCallback } from "react";
+import { Suspense, useEffect, useState, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { get } from "@/lib/api-client";
 import { useRoleName } from "@/hooks/use-current-user";
@@ -71,7 +72,7 @@ function NextActionCell({ opp }: { opp: OpportunityListItem }) {
   );
 }
 
-export default function OpportunitiesPage() {
+function OpportunitiesPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const roleName  = useRoleName();
@@ -350,5 +351,13 @@ export default function OpportunitiesPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function OpportunitiesPage() {
+  return (
+    <Suspense fallback={<div className="animate-pulse h-8 w-48 rounded bg-muted" />}>
+      <OpportunitiesPageContent />
+    </Suspense>
   );
 }

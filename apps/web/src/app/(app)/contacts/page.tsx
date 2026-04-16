@@ -1,14 +1,15 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { useEffect, useState, useCallback } from "react";
+import { Suspense, useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { get } from "@/lib/api-client";
 import type { ContactListItem, PaginatedResult } from "@solaroo/types";
 
 const PAGE_SIZE = 25;
 
-export default function ContactsPage() {
+function ContactsPageContent() {
   const searchParams = useSearchParams();
   const accountIdFilter = searchParams.get("accountId") ?? "";
 
@@ -209,5 +210,13 @@ export default function ContactsPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function ContactsPage() {
+  return (
+    <Suspense fallback={<div className="animate-pulse h-8 w-48 rounded bg-muted" />}>
+      <ContactsPageContent />
+    </Suspense>
   );
 }

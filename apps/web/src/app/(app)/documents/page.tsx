@@ -1,6 +1,7 @@
 "use client";
+export const dynamic = "force-dynamic";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { Suspense, useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { get, del, uploadFile, API_BASE_URL_EXPORT } from "@/lib/api-client";
 import type { PaginatedResult } from "@solaroo/types";
@@ -475,7 +476,7 @@ function UploadDialog({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-export default function DocumentsPage() {
+function DocumentsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -856,5 +857,13 @@ export default function DocumentsPage() {
         />
       )}
     </div>
+  );
+}
+
+export default function DocumentsPage() {
+  return (
+    <Suspense fallback={<div className="animate-pulse h-8 w-48 rounded bg-muted" />}>
+      <DocumentsPageContent />
+    </Suspense>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
+export const dynamic = "force-dynamic";
 
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { get, post } from "@/lib/api-client";
@@ -32,7 +33,7 @@ const INITIAL: FormState = {
   relationship: "",
 };
 
-export default function NewContactPage() {
+function NewContactPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const prefilledAccountId = searchParams.get("accountId") ?? "";
@@ -276,5 +277,13 @@ export default function NewContactPage() {
         </div>
       </form>
     </div>
+  );
+}
+
+export default function NewContactPage() {
+  return (
+    <Suspense fallback={<div className="animate-pulse h-8 w-48 rounded bg-muted" />}>
+      <NewContactPageContent />
+    </Suspense>
   );
 }

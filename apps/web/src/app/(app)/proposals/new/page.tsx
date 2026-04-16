@@ -1,6 +1,7 @@
 "use client";
+export const dynamic = "force-dynamic";
 
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { get, post } from "@/lib/api-client";
@@ -37,7 +38,7 @@ const INITIAL: FormState = {
   commercialSummary: "",
 };
 
-export default function NewProposalPage() {
+function NewProposalPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const prefilledOppId = searchParams.get("opportunityId") ?? "";
@@ -259,5 +260,13 @@ export default function NewProposalPage() {
         </div>
       </form>
     </div>
+  );
+}
+
+export default function NewProposalPage() {
+  return (
+    <Suspense fallback={<div className="animate-pulse h-8 w-48 rounded bg-muted" />}>
+      <NewProposalPageContent />
+    </Suspense>
   );
 }

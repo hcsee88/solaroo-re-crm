@@ -1,7 +1,8 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import Link from "next/link";
-import { useEffect, useState, useCallback } from "react";
+import { Suspense, useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { get } from "@/lib/api-client";
 import type { SiteListItem, SiteGridCategory, PaginatedResult } from "@solaroo/types";
@@ -18,7 +19,7 @@ function GridBadge({ category }: { category: SiteGridCategory }) {
   );
 }
 
-export default function SitesPage() {
+function SitesPageContent() {
   const searchParams = useSearchParams();
   const accountIdFilter = searchParams.get("accountId") ?? "";
 
@@ -182,5 +183,13 @@ export default function SitesPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function SitesPage() {
+  return (
+    <Suspense fallback={<div className="animate-pulse h-8 w-48 rounded bg-muted" />}>
+      <SitesPageContent />
+    </Suspense>
   );
 }

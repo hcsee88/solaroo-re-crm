@@ -1,6 +1,7 @@
 "use client";
+export const dynamic = "force-dynamic";
 
-import { useEffect, useState, useCallback } from "react";
+import { Suspense, useEffect, useState, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { get } from "@/lib/api-client";
 import type { PaginatedResult } from "@solaroo/types";
@@ -547,7 +548,7 @@ function ProductsTab() {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function ProcurementPage() {
+function ProcurementPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const activeTab = (searchParams.get("tab") as Tab) ?? "purchase-orders";
@@ -598,5 +599,13 @@ export default function ProcurementPage() {
       {activeTab === "vendors" && <VendorsTab />}
       {activeTab === "products" && <ProductsTab />}
     </div>
+  );
+}
+
+export default function ProcurementPage() {
+  return (
+    <Suspense fallback={<div className="animate-pulse h-8 w-48 rounded bg-muted" />}>
+      <ProcurementPageContent />
+    </Suspense>
   );
 }
