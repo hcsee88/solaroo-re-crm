@@ -37,13 +37,10 @@ COPY --from=builder /app/pnpm-workspace.yaml ./pnpm-workspace.yaml
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
 
-# Install prisma CLI globally so migrate deploy works in runner
-RUN pnpm add -g prisma@5.22.0
-
 WORKDIR /app/apps/api
 
 ENV NODE_ENV=production
 EXPOSE ${PORT:-4000}
 
-# Run migrations then start API
-CMD ["sh", "-c", "cd /app && prisma migrate deploy --schema packages/db/prisma/schema.prisma && cd /app/apps/api && node dist/main"]
+# Run migrations then start API (use pnpm exec since pnpm is in base image)
+CMD ["sh", "-c", "cd /app && pnpm exec prisma migrate deploy --schema packages/db/prisma/schema.prisma && cd /app/apps/api && node dist/main"]
