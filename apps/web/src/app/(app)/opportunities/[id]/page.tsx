@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { get, post, patch, del, uploadFile, API_BASE_URL_EXPORT } from "@/lib/api-client";
+import { get, post, patch } from "@/lib/api-client";
 import type {
   OpportunityDetail,
   OpportunityStageValue,
@@ -14,40 +14,7 @@ import {
   OPPORTUNITY_STAGE_ORDER,
   COMMERCIAL_MODEL_LABELS,
 } from "@solaroo/types";
-
-// ─── Document types ───────────────────────────────────────────────────────────
-
-type OppDocument = {
-  id: string;
-  docCode: string;
-  title: string;
-  docType: string;
-  status: string;
-  currentRevision: string | null;
-  notes: string | null;
-  createdAt: string;
-  fileSizeBytes: number | null;
-  mimeType: string | null;
-  fileName: string | null;
-  uploadedAt: string | null;
-  owner: { id: string; name: string } | null;
-};
-
-const DOC_CATEGORIES = [
-  "Site Information",
-  "Drawings",
-  "Costing",
-  "Proposal",
-  "Contracts",
-  "Other",
-] as const;
-
-function formatBytes(bytes: number | null): string {
-  if (!bytes) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+import { LinkedDocsSection } from "@/components/documents/linked-docs-section";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -150,8 +117,8 @@ function TransitionModal({
   useEffect(() => {
     if (isWon && users.length === 0) {
       setLoadingUsers(true);
-      get<{ items: UserOption[] }>("/admin/users?pageSize=100&isActive=true")
-        .then((r) => setUsers(r.items))
+      get<UserOption[]>("/admin/users/dropdown")
+        .then((r) => setUsers(r))
         .catch(() => {})
         .finally(() => setLoadingUsers(false));
     }
@@ -480,63 +447,6 @@ export default function OpportunityDetailPage() {
   const [showTransition, setShowTransition] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "history" | "documents">("overview");
 
-  // Documents state
-  const [docs, setDocs] = useState<OppDocument[]>([]);
-  const [docsLoading, setDocsLoading] = useState(false);
-  const [uploading, setUploading] = useState<string | null>(null); // category being uploaded
-  const [docError, setDocError] = useState<string | null>(null);
-  const [uploadTitle, setUploadTitle] = useState<Record<string, string>>({});
-  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-
-  function loadDocs() {
-    setDocsLoading(true);
-    get<OppDocument[]>(`/documents?opportunityId=${id}`)
-      .then(setDocs)
-      .catch(() => {})
-      .finally(() => setDocsLoading(false));
-  }
-
-  useEffect(() => {
-    if (activeTab === "documents" && docs.length === 0 && !docsLoading) {
-      loadDocs();
-    }
-  }, [activeTab]);
-
-  async function handleUpload(category: string) {
-    const input = fileInputRefs.current[category];
-    const file = input?.files?.[0];
-    const title = (uploadTitle[category] || "").trim() || file?.name || "Untitled";
-    if (!file) return;
-
-    setUploading(category);
-    setDocError(null);
-    try {
-      const newDoc = await uploadFile<OppDocument>("/documents/upload", file, {
-        title,
-        docType: category,
-        opportunityId: id,
-      });
-      setDocs((prev) => [newDoc, ...prev]);
-      // Reset input + title
-      if (input) input.value = "";
-      setUploadTitle((prev) => ({ ...prev, [category]: "" }));
-    } catch (err) {
-      setDocError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setUploading(null);
-    }
-  }
-
-  async function handleDeleteDoc(docId: string) {
-    if (!confirm("Delete this document? This cannot be undone.")) return;
-    try {
-      await del(`/documents/${docId}`);
-      setDocs((prev) => prev.filter((d) => d.id !== docId));
-    } catch (err) {
-      setDocError(err instanceof Error ? err.message : "Delete failed");
-    }
-  }
-
   useEffect(() => {
     get<OpportunityDetail>(`/opportunities/${id}`)
       .then(setOpp)
@@ -627,7 +537,7 @@ export default function OpportunityDetailPage() {
           {[
             { key: "overview", label: "Overview" },
             { key: "history", label: `Stage History (${opp.stageHistory.length})` },
-            { key: "documents", label: `Documents${docs.length > 0 ? ` (${docs.length})` : ""}` },
+            { key: "documents", label: "Documents" },
           ].map((tab) => (
             <button
               key={tab.key}
@@ -744,109 +654,12 @@ export default function OpportunityDetailPage() {
 
       {/* ── Documents tab ────────────────────────────────────────────────────── */}
       {activeTab === "documents" && (
-        <div className="space-y-4">
-          {docError && (
-            <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-              {docError}
-            </div>
-          )}
-
-          {docsLoading ? (
-            <div className="space-y-3 animate-pulse">
-              {[1, 2, 3].map((i) => <div key={i} className="h-24 rounded-lg bg-muted" />)}
-            </div>
-          ) : (
-            DOC_CATEGORIES.map((category) => {
-              const catDocs = docs.filter((d) => d.docType === category);
-              const isUploading = uploading === category;
-
-              return (
-                <div key={category} className="rounded-lg border bg-card overflow-hidden">
-                  {/* Category header */}
-                  <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold">{category}</span>
-                      {catDocs.length > 0 && (
-                        <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
-                          {catDocs.length}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="p-4 space-y-3">
-                    {/* File list */}
-                    {catDocs.length > 0 && (
-                      <ul className="space-y-2">
-                        {catDocs.map((doc) => (
-                          <li key={doc.id} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2.5 text-sm bg-background">
-                            <div className="min-w-0 flex-1">
-                              <p className="font-medium truncate">{doc.title}</p>
-                              <p className="text-xs text-muted-foreground mt-0.5">
-                                {doc.fileName && <span className="font-mono">{doc.fileName}</span>}
-                                {doc.fileSizeBytes && <span> · {formatBytes(doc.fileSizeBytes)}</span>}
-                                {doc.uploadedAt && (
-                                  <span> · {new Date(doc.uploadedAt).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}</span>
-                                )}
-                                {doc.owner && <span> · {doc.owner.name}</span>}
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-1 flex-shrink-0">
-                              <a
-                                href={`${API_BASE_URL_EXPORT}/api/documents/${doc.id}/download`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-2.5 py-1 rounded-md border text-xs font-medium hover:bg-muted transition-colors"
-                              >
-                                Download
-                              </a>
-                              <button
-                                onClick={() => handleDeleteDoc(doc.id)}
-                                className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                                title="Delete"
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-
-                    {/* Upload row */}
-                    <div className="flex gap-2 items-center flex-wrap">
-                      <input
-                        type="text"
-                        value={uploadTitle[category] || ""}
-                        onChange={(e) => setUploadTitle((prev) => ({ ...prev, [category]: e.target.value }))}
-                        placeholder="Document title (optional)"
-                        className="h-8 flex-1 min-w-[160px] rounded-md border border-input px-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                      />
-                      <label className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium cursor-pointer transition-colors ${
-                        isUploading ? "opacity-50 cursor-not-allowed" : "hover:bg-muted"
-                      }`}>
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                        </svg>
-                        {isUploading ? "Uploading…" : "Upload File"}
-                        <input
-                          type="file"
-                          ref={(el) => { fileInputRefs.current[category] = el; }}
-                          className="sr-only"
-                          disabled={isUploading}
-                          onChange={() => handleUpload(category)}
-                          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.dwg,.dxf,.jpg,.jpeg,.png,.zip,.rar"
-                        />
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
+        <LinkedDocsSection
+          contextType="opportunity"
+          contextId={id}
+          canUpload={true}
+          canDelete={true}
+        />
       )}
     </div>
   );

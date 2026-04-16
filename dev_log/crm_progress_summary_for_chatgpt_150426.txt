@@ -1,0 +1,516 @@
+SOLAROO RE CRM — PROGRESS SUMMARY FOR EXTERNAL REVIEW
+Generated: 2026-04-15
+Company: Pekat Teknologi Sdn Bhd (Malaysia)
+Reviewer context: Architecture review / second opinion request
+==============================================================================
+
+SECTION 1 — WHAT THIS SYSTEM IS
+---------------------------------
+Solaroo RE CRM is an internal, single-company platform built for Pekat Teknologi
+Sdn Bhd. It is NOT a SaaS product. It covers the full lifecycle of off-grid solar,
+hybrid solar-diesel, and BESS (Battery Energy Storage System) projects — from
+first customer contact through O&M handover.
+
+It also functions as a light ERP (procurement, invoicing milestones, contract
+tracking) and a document control system.
+
+Typical projects handled: plantation solar, island microgrids, resort off-grid,
+C&I solar + diesel hybrid, weak-grid BESS. Project values range from RM 500K to
+RM 10M+.
+
+Team size: 15 users now. Expected ~30 in 2 years.
+
+Business lifecycle covered:
+  Account → Site → Opportunity → Proposal → Contract → Project
+  → Commissioning → Asset Register → O&M
+
+
+SECTION 2 — TECHNICAL STACK
+-----------------------------
+Architecture:       Modular monolith (deliberate choice — not microservices)
+Monorepo tool:      pnpm workspaces + Turborepo
+Language:           TypeScript throughout (frontend + backend)
+
+Frontend:           Next.js 14 (App Router)
+                    Tailwind CSS + shadcn/ui
+                    React Query for server state
+                    Axios API client (httpOnly cookie auth)
+
+Backend:            NestJS + Fastify adapter
+                    Port 4000
+                    JWT auth via httpOnly cookies
+                    Zod validation at all API boundaries
+                    Global ResponseInterceptor wraps all responses
+                    Permission guard (AUTHZ_ENFORCE=true in production)
+
+Database:           PostgreSQL 16 (Docker)
+                    Prisma ORM — split schema files per domain
+                    Single migration file (initial schema)
+
+Job queue:          Redis 7 + BullMQ (planned — not yet implemented)
+File storage:       S3-compatible (planned — not yet implemented)
+
+Deployment target:  Single Linux VM / VPS
+                    Docker Compose for Postgres + Redis
+                    Nginx reverse proxy + TLS
+
+Repository:         https://github.com/hcsee88/solaroo-re-crm (private)
+                    Initial commit April 2026 — 204 files, 40,141 insertions
+
+
+SECTION 3 — MONOREPO STRUCTURE
+--------------------------------
+apps/
+  web/          Next.js 14 frontend (port 3000)
+  api/          NestJS + Fastify backend (port 4000)
+
+packages/
+  @solaroo/db           Prisma schema, migrations, seeder, generated client
+  @solaroo/types        Shared TypeScript types and DTOs
+  @solaroo/workflows    Stage transition maps, gate checklists (state machines)
+  @solaroo/ui           Shared shadcn/ui component library
+  @solaroo/documents    Document handling utilities
+  @solaroo/ai-prompts   Domain-specific AI prompt templates
+  @solaroo/config       Zod-based environment config validation
+
+services/
+  worker/       BullMQ job consumer (scaffolded, not yet implemented)
+
+docs/           Architecture docs, role-based UI rules, PMO direction
+dev_log/        Session logs and progress summaries
+infrastructure/
+  docker/       docker-compose.yml (Postgres + Redis)
+
+
+SECTION 4 — DATABASE SCHEMA (10 FILES, 56 MODELS)
+---------------------------------------------------
+auth.prisma
+  Models: User, Role, Permission, RolePermission, UserPermission,
+          ProjectMember, OpportunityMember, Team, TeamMember
+  Purpose: Auth, RBAC, team assignments
+
+crm.prisma
+  Models: Account, Contact, AccountContact, Site, SitePhoto,
+          Opportunity, OpportunityStageHistory, Activity
+  Purpose: Core CRM — accounts, contacts, sites, opportunity pipeline
+
+proposals.prisma
+  Models: SiteSurvey, LoadProfile, SolutionOption, Proposal,
+          ProposalVersion, ProposalAssumptionSet, ProposalApproval
+  Purpose: Proposal lifecycle with versioning, frozen assumptions, approvals
+
+projects.prisma
+  Models: Project, ProjectTeamAssignment, ProjectGate, GateDeliverable,
+          Milestone, Task, Issue, Risk, Rfi, Submittal, Variation,
+          CommissioningTest, PunchlistItem
+  Purpose: Project execution — gates, milestones, risks, commissioning
+
+procurement.prisma
+  Models: Vendor, VendorContact, Product, Rfq, RfqLineItem,
+          VendorQuote, PurchaseOrder, PoLineItem, Delivery, EquipmentSerial
+  Purpose: Supply chain — vendor management, RFQ, PO, delivery, serial tracking
+
+contracts.prisma
+  Models: Contract, ContractMilestone, Invoice, Budget
+  Purpose: Contract management, invoice milestones, budget tracking
+
+documents.prisma
+  Models: Document, DocumentRevision, Transmittal, TransmittalItem
+  Purpose: Document control with revision history and transmittals
+
+om.prisma
+  Models: Asset, MaintenancePlan, MaintenanceRecord, ServiceTicket,
+          WarrantyClaim, SparePart, PerformanceLog
+  Purpose: O&M — asset register, maintenance scheduling, service tickets
+
+audit.prisma
+  Models: AuditLog, Notification, SavedView, Tag
+  Purpose: Audit trail, notifications, user-saved views
+
+schema.prisma
+  Purpose: Root orchestrator — combines all schemas, sets DB provider
+
+
+SECTION 5 — API MODULES (19 TOTAL)
+------------------------------------
+FULLY IMPLEMENTED (real service logic, Prisma queries, business rules):
+
+Module          | Lines | Key capabilities
+----------------|-------|----------------------------------------------------------
+accounts        | 271   | CRUD, ACC-XXXX code gen, pagination, filtering
+contacts        | 289   | CRUD, linked to accounts via join table, filterable
+sites           | 280   | CRUD, SITE-XXXX codes, coordinates, grid category
+opportunities   | 353   | Stage transitions (state machine), OPP-YY-XXX codes,
+                |       | pipeline view, member management
+proposals       | 562   | Proposal versions (immutable after approval),
+                |       | assumption sets, approval workflow, new version on reject
+projects        | 340   | Auto-created from won opportunity, gates, milestones,
+                |       | RAG status, PMO governance fields
+reporting       | 472   | Dashboard metrics, pipeline aggregation, PMO analytics,
+                |       | RAG breakdown, red project reporting, quick counts
+documents       | 263   | Folder structure, upload, revisions, file retrieval
+procurement     | 625   | Vendors (VEN-XXXX), products (PRD-XXXX),
+                |       | purchase orders (PO26-XXXX) with line items,
+                |       | deliveries, full status lifecycle
+auth            | 112   | JWT login, httpOnly cookie session, /auth/me
+admin           | 185   | User management, role assignment (SUPER_ADMIN only)
+
+STUB / PLACEHOLDER (scaffolded module, no real service logic yet):
+
+Module                | Status
+----------------------|------------------------------------------
+gates                 | Stub — findAll/findById return empty
+maintenance           | Stub — same
+notifications         | Stub — same
+assets                | Stub — same
+contracts             | Stub — same
+ai                    | Stub — no DTO, no logic
+technical-assessment  | Empty folder, not started
+
+BUILT API ROUTES SUMMARY:
+  /auth/*                           — login, logout, me
+  /accounts, /accounts/:id          — CRUD
+  /contacts, /contacts/:id          — CRUD
+  /sites, /sites/:id                — CRUD
+  /opportunities, /opportunities/:id — CRUD + stage transitions
+  /proposals, /proposals/:id        — CRUD + approvals + new version
+  /projects, /projects/:id          — CRUD + gate/milestone queries
+  /reporting/dashboard              — dashboard aggregates
+  /reporting/pmo                    — PMO portfolio metrics
+  /procurement/vendors              — CRUD
+  /procurement/products             — CRUD
+  /procurement/purchase-orders      — CRUD + status update
+  /procurement/deliveries           — CRUD
+  /admin/users, /admin/roles        — user/role management
+
+
+SECTION 6 — FRONTEND PAGES
+----------------------------
+FULLY IMPLEMENTED (real API calls, loading states, filtering, pagination):
+
+Route                       | Lines | Features
+----------------------------|-------|-------------------------------------------
+/dashboard                  | 452   | KPI cards, pipeline health, proposal status,
+                            |       | project health — all role-gated
+/accounts                   | 276   | List + detail + create + edit
+/contacts                   |       | List + detail + create + edit
+/sites                      |       | List + detail + create + edit
+/opportunities              | 354   | List + detail + create + edit,
+                            |       | stage transition modal, pipeline bar
+/proposals                  | 277   | List + detail + create, version timeline
+/projects                   | 277   | List + detail, gate tracker
+/pmo                        | 593   | Portfolio dashboard — RAG status, blockers,
+                            |       | milestone tracker, gate compliance
+/procurement                | 602   | 3-tab: Purchase Orders, Vendors, Products
+                            |       | Status badges, filters, pagination
+/admin/users                |       | User list + create + edit
+
+STUB PAGES (placeholder text, no real implementation):
+
+Route           | Status
+----------------|---------------------------------------------
+/documents      | Placeholder — "DocumentSearch + DocumentTable will go here"
+/om             | Placeholder — "AssetFleetOverview + TicketQueue will go here"
+/reports        | Not yet created
+
+
+SECTION 7 — SECURITY AND PERMISSIONS
+--------------------------------------
+Two-layer security model:
+
+Layer 1 — Backend (hard enforcement):
+  - JwtAuthGuard: validates httpOnly cookie on every request
+  - PermissionGuard: checks user.role.permissions against @RequirePermission()
+  - AUTHZ_ENFORCE=true: returns HTTP 403 on any permission violation
+  - All mutations validated with ZodValidationPipe at controller level
+
+Layer 2 — Frontend (UI gating):
+  - Single config file: apps/web/src/lib/role-ui.ts
+  - Pure functions: canSeeProposalCapex(), canSeeOpportunityValue(), etc.
+  - Sidebar nav items filtered per role (getNavItemsForRole)
+  - Table columns hidden per role (CAPEX, Margin, pipeline values)
+  - Dashboard sections conditionally rendered per role
+
+13 ROLES DEFINED:
+  SUPER_ADMIN, DIRECTOR, PMO_MANAGER, SALES_MANAGER, SALES_ENGINEER,
+  PROJECT_MANAGER, DESIGN_LEAD, DESIGN_ENGINEER, PROCUREMENT,
+  SITE_SUPERVISOR, COMMISSIONING_ENGINEER, OM_ENGINEER, FINANCE_ADMIN
+
+SENSITIVE FIELD RESTRICTIONS (UI layer):
+  Proposal CAPEX:          DIRECTOR, SALES_MANAGER, FINANCE_ADMIN only
+  Proposal Margin %:       DIRECTOR, SALES_MANAGER, FINANCE_ADMIN only
+  Opportunity Value (RM):  DIRECTOR, SALES_MANAGER, SALES_ENGINEER, FINANCE_ADMIN
+  Pipeline total RM value: DIRECTOR, SALES_MANAGER only
+  Stage value breakdown:   DIRECTOR, SALES_MANAGER only
+
+PERMISSION CATEGORIES (backend layer):
+  Resource-level permissions with scope modifiers:
+    account, contact, site, opportunity, assessment, proposal, project,
+    gate, milestone, issue, risk, document, drawing, vendor, rfq, quote,
+    purchase_order, delivery, site_log, checklist, punch_list,
+    testing_sheet, reporting, admin
+
+  Scope types: :all, :assigned, :own, :team
+
+SPECIAL RULES:
+  - SUPER_ADMIN: user management only, no business data access
+  - SUPER_ADMIN login redirects to /admin/users (not /dashboard)
+  - 403 responses redirect to /forbidden page (not blank page)
+  - Session cookies are httpOnly — frontend never reads the JWT token
+
+
+SECTION 8 — ROLE-BASED SIDEBAR (role-ui.ts)
+---------------------------------------------
+SUPER_ADMIN         : (none — admin section rendered separately)
+DIRECTOR            : Dashboard, Accounts, Contacts, Sites, Opportunities,
+                      Proposals, Projects, PMO, Procurement, Documents, O&M, Reports
+PMO_MANAGER         : Dashboard, Projects, PMO, Documents, Reports
+SALES_MANAGER       : Dashboard, Accounts, Contacts, Sites, Opportunities,
+                      Proposals, Documents, Reports
+SALES_ENGINEER      : Dashboard, Accounts, Contacts, Sites, Opportunities,
+                      Proposals, Documents
+PROJECT_MANAGER     : Dashboard, Projects, PMO, Documents, Reports
+DESIGN_LEAD         : Dashboard, Opportunities, Proposals, Projects,
+                      Documents, PMO, Reports
+DESIGN_ENGINEER     : Dashboard, Opportunities, Projects, Documents
+PROCUREMENT         : Dashboard, Projects, Procurement, Documents
+SITE_SUPERVISOR     : Dashboard, Projects, Documents, O&M
+COMMISSIONING_ENGINEER : Dashboard, Projects, Documents, O&M
+OM_ENGINEER         : Dashboard, O&M, Projects, Documents
+FINANCE_ADMIN       : Dashboard, Reports, Projects, Documents
+
+
+SECTION 9 — KEY BUSINESS RULES IMPLEMENTED
+--------------------------------------------
+1. Opportunity stage transitions: controlled state machine (no arbitrary jumps)
+   Defined in @solaroo/workflows package. Transitions validated server-side.
+
+2. Proposal versioning: proposals are immutable after approval. Changes require
+   a new version. Every version references a frozen ProposalAssumptionSet.
+
+3. Won opportunity → project: a project record is auto-created when opportunity
+   stage changes to WON. Never created manually.
+
+4. Project code format: SRE{YY}-{SITE_PREFIX}{NNN} (e.g. SRE26-PSO002)
+
+5. Auto-generated codes: ACC-XXXX (accounts), SITE-XXXX (sites),
+   OPP-YY-NNN (opportunities), VEN-XXXX (vendors), PRD-XXXX (products),
+   PO{YY}-XXXX (purchase orders)
+
+6. Audit logging: all status changes, approvals, and key edits write to AuditLog.
+
+7. Assets: only created at commissioning/handover — never before.
+
+8. Warranty: captured per installed asset at serial number level.
+
+9. Gate tracker: structured checklists with approval states per gate.
+   Gate closure is auditable.
+
+10. RAG status: projects have GREEN/AMBER/RED status with blocker tracking
+    (blocker description, owner, due date) managed via PMO module.
+
+
+SECTION 10 — WHAT IS VERIFIED WORKING
+---------------------------------------
+The following have been manually tested and confirmed functional:
+
+AUTH:
+  ✅ Login / logout with httpOnly cookie session
+  ✅ /auth/me returns correct user and role
+  ✅ AUTHZ_ENFORCE=true — 403 on unauthorized access
+  ✅ 403 → /forbidden redirect (no blank page)
+  ✅ SUPER_ADMIN login redirects to /admin/users
+  ✅ Operational roles (6) can access dashboard after reporting:view:assigned fix
+
+CRM:
+  ✅ Account list, create, detail, edit
+  ✅ Contact list, create, linked to accounts
+  ✅ Site list, create, linked to accounts
+  ✅ Opportunity list with stage badges and pipeline bar
+  ✅ Opportunity stage transitions via modal
+  ✅ OPP-YY-XXX code generation
+
+PROPOSALS:
+  ✅ Proposal list with version history
+  ✅ Proposal detail with assumption set
+  ✅ Proposal approval workflow
+
+PROJECTS + PMO:
+  ✅ Project auto-creation from won opportunity
+  ✅ Project list with RAG status
+  ✅ Project detail with gates and milestones
+  ✅ PMO dashboard — RAG breakdown, blockers, gate compliance
+  ✅ PMO metrics API (/reporting/pmo)
+
+PROCUREMENT:
+  ✅ API routes built and validated (vendors, products, POs, deliveries)
+  ✅ Frontend page with 3 tabs (Purchase Orders, Vendors, Products)
+  ✅ Status badge system for PO lifecycle
+  ✅ Auto-generated codes (VEN-XXXX, PRD-XXXX, PO26-XXXX)
+  Note: Not yet end-to-end tested (Docker was down during review session)
+
+ROLE-BASED UI:
+  ✅ Sidebar filtered per role
+  ✅ CAPEX/Margin hidden from non-commercial roles on proposals list
+  ✅ Opportunity Value hidden from execution roles
+  ✅ Dashboard sections gated by role (pipeline, proposals, project health)
+  ✅ Pipeline RM value restricted to DIRECTOR and SALES_MANAGER only
+
+ADMIN:
+  ✅ User management (list, create, edit, deactivate)
+  ✅ Role assignment
+  ✅ SUPER_ADMIN isolation (no business data access)
+
+INFRASTRUCTURE:
+  ✅ Docker Compose — Postgres 16 + Redis 7
+  ✅ pnpm workspace dependency resolution
+  ✅ Turborepo build pipeline
+  ✅ Git repository — https://github.com/hcsee88/solaroo-re-crm
+
+
+SECTION 11 — WHAT IS NOT YET BUILT (OPEN ITEMS)
+-------------------------------------------------
+HIGH PRIORITY (next sprints):
+
+  Document Control module
+    - Document list with revision history
+    - Document upload and version management
+    - Transmittal management
+    - Approval workflow (submit → review → approve/reject)
+    - The backend service exists (263 lines) — needs frontend page
+
+  O&M module
+    - Asset register (linked to commissioning)
+    - Maintenance planning (scheduled PM)
+    - Service ticket management
+    - Warranty claim tracking
+    - The Prisma schema is complete — backend and frontend both need building
+
+  Contracts module
+    - Contract creation linked to won proposal
+    - Invoice milestone tracking
+    - Payment status
+    - Budget vs actual tracking
+    - Schema complete — backend stub only, no frontend
+
+  Gates module (full implementation)
+    - Structured checklist items per gate
+    - Gate approval workflow (submit → review → approve/close)
+    - Currently stub — schema is complete
+
+MEDIUM PRIORITY:
+
+  Reports module
+    - Exportable pipeline report
+    - Project status report
+    - Procurement spend report
+    - No page exists yet
+
+  RFQ workflow (procurement V2)
+    - Issue RFQ to vendor
+    - Receive and compare vendor quotes
+    - Select winning quote → generate PO
+
+  Procurement V2 features
+    - New PO / New Vendor / New Product forms (buttons exist, modals not built)
+    - PO detail page
+    - Equipment serial tracking
+
+  Technical Assessment module
+    - Site survey data capture
+    - Load profile analysis
+    - Solution sizing tool
+    - Empty folder — not started
+
+LOWER PRIORITY:
+
+  AI module
+    - Project status summarization
+    - Proposal narrative drafting
+    - RAG over documents
+    - Stub only — no logic
+
+  BullMQ worker
+    - Auto-create project on WON opportunity (currently synchronous)
+    - Notification dispatch
+    - PDF generation
+    - Scaffolded but empty
+
+  Mobile-optimized views
+    - Site diary, photo upload, punch list for site team
+    - Currently responsive but not mobile-first
+
+  B-03: Service layer scope filtering
+    - Verify :assigned permission actually filters records to assigned only
+    - Not yet validated
+
+  B-04: Sensitive field stripping at API level
+    - Verify margin/CAPEX not returned on detail endpoints for restricted roles
+    - Currently enforced at UI layer only — backend validation pending
+
+
+SECTION 12 — BUILD PROGRESS AGAINST MVP ORDER
+----------------------------------------------
+MVP Order (from project brief):
+
+  1. ✅ Auth and roles
+  2. ✅ Accounts, contacts, sites
+  3. ✅ Opportunities and stage history
+  4. ✅ Proposal versions and assumptions
+  5. ✅ Project creation from won opportunity
+  6. ✅ Gate tracker (schema + PMO view — full gate CRUD pending)
+  7. ⬜ Document control (backend done — frontend pending)
+  8. ⬜ Dashboards (dashboard done — full reports pending)
+  9. ⬜ Procurement (backend + frontend done — forms + detail pages pending)
+  10. ⬜ O&M module (schema done — backend + frontend pending)
+
+Additional completed beyond MVP order:
+  ✅ PMO portfolio dashboard (RAG, blockers, gate compliance)
+  ✅ Role-based UI visibility (sidebar, column, dashboard section gating)
+  ✅ Permission system (13 roles, granular RBAC, AUTHZ_ENFORCE)
+  ✅ Admin module (user + role management)
+  ✅ 403 forbidden page + api-client error handling
+  ✅ GitHub repository setup
+
+
+SECTION 13 — ARCHITECTURE DECISIONS AND RATIONALE
+---------------------------------------------------
+Decision: Modular monolith, not microservices
+  Rationale: 15-30 users. All domains share one DB. No distributed transaction
+  complexity needed. One deployment, one codebase, one Prisma schema.
+
+Decision: Prisma split schema files
+  Rationale: Single schema.prisma becomes unreadable at 56 models. Domain
+  separation (auth.prisma, crm.prisma, etc.) makes maintenance tractable.
+
+Decision: httpOnly cookie for JWT (not localStorage)
+  Rationale: XSS protection. Frontend never touches the token directly.
+
+Decision: Two-layer security (backend AUTHZ + frontend role-ui.ts)
+  Rationale: Backend AUTHZ blocks unauthorized API calls (hard enforcement).
+  Frontend role-ui.ts hides irrelevant UI (UX + accidental exposure prevention).
+  Both layers independent — bypassing frontend doesn't bypass backend.
+
+Decision: Permission to access endpoint ≠ permission to see every field
+  Rationale: Commercial sensitivity. A Project Manager can access /proposals
+  for project context but should not see margin % or CAPEX. Field-level
+  visibility controlled separately from endpoint access.
+
+Decision: Immutable proposal versions
+  Rationale: Solar project proposals involve months of negotiation. Version
+  history must be auditable. Approved versions can never be modified.
+
+Decision: Frozen assumption sets on proposals
+  Rationale: Proposal pricing depends on assumptions (grid tariff, diesel price,
+  solar irradiation, equipment specs). If assumptions change, a new version is
+  required so old vs new can be compared.
+
+Decision: Won opportunity → project auto-creation
+  Rationale: Prevents data inconsistency. A won opportunity always has exactly
+  one project. Manual creation would allow won opportunities without projects.
+
+==============================================================================
+END OF SUMMARY
+Generated for external architecture review — 2026-04-15
+Project: Solaroo RE CRM | Company: Pekat Teknologi Sdn Bhd
+==============================================================================

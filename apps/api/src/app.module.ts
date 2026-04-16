@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import { ConfigModule } from "@nestjs/config";
 import { ThrottlerModule } from "@nestjs/throttler";
+import { resolve } from "node:path";
 import { DatabaseModule } from "./common/database/database.module";
 import { AuthzModule } from "./common/authz/authz.module";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
@@ -23,13 +24,24 @@ import { ReportingModule } from "./modules/reporting/reporting.module";
 import { AiModule } from "./modules/ai/ai.module";
 import { AdminModule } from "./modules/admin/admin.module";
 import { NotificationsModule } from "./modules/notifications/notifications.module";
+import { SearchModule } from "./modules/search/search.module";
 
 @Module({
   imports: [
-    // Config — loads .env, validates required vars
+    // Load env files deterministically whether the process starts from the repo
+    // root, apps/api, or a compiled dist entrypoint.
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: [".env.local", ".env"],
+      envFilePath: [
+        resolve(process.cwd(), ".env.local"),
+        resolve(process.cwd(), ".env"),
+        resolve(process.cwd(), "apps/api/.env.local"),
+        resolve(process.cwd(), "apps/api/.env"),
+        resolve(__dirname, "../../.env.local"),
+        resolve(__dirname, "../../.env"),
+        resolve(__dirname, "../../../../.env.local"),
+        resolve(__dirname, "../../../../.env"),
+      ],
     }),
 
     // Rate limiting
@@ -64,6 +76,7 @@ import { NotificationsModule } from "./modules/notifications/notifications.modul
     AiModule,
     AdminModule,
     NotificationsModule,
+    SearchModule,
   ],
   providers: [
     // JWT auth — runs first; rejects unauthenticated requests (except @Public routes)

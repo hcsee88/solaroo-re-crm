@@ -73,7 +73,7 @@ export class ProjectsController {
 
   // PATCH /api/projects/:id/gates/:gateNo/status
   @Patch(':id/gates/:gateNo/status')
-  @RequirePermission('project_gate', 'edit')
+  @RequirePermission('project_gate', 'view')
   updateGateStatus(
     @Param('id') id: string,
     @Param('gateNo', ParseIntPipe) gateNo: number,
@@ -85,7 +85,7 @@ export class ProjectsController {
 
   // PATCH /api/projects/:id/deliverables/:deliverableId
   @Patch(':id/deliverables/:deliverableId')
-  @RequirePermission('project', 'edit')
+  @RequirePermission('project', 'view')
   updateDeliverable(
     @Param('id') id: string,
     @Param('deliverableId') deliverableId: string,

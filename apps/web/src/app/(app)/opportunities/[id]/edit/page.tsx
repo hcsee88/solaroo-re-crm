@@ -56,11 +56,11 @@ export default function EditOpportunityPage() {
   useEffect(() => {
     Promise.all([
       get<OpportunityDetail>(`/opportunities/${id}`),
-      get<{ items: UserOption[] }>("/admin/users?pageSize=100&isActive=true"),
+      get<UserOption[]>("/admin/users/dropdown"),
     ])
       .then(([o, u]) => {
         setOpp(o);
-        setUsers(u.items);
+        setUsers(u);
         setForm({
           title: o.title,
           ownerUserId: o.ownerUserId,
@@ -71,7 +71,7 @@ export default function EditOpportunityPage() {
           estimatedBessKwh: o.estimatedBessKwh ?? "",
           probabilityPercent: o.probabilityPercent != null ? String(o.probabilityPercent) : "",
           expectedAwardDate: o.expectedAwardDate
-            ? new Date(o.expectedAwardDate).toISOString().split("T")[0]
+            ? (new Date(o.expectedAwardDate).toISOString().split("T")[0] ?? "")
             : "",
           summary: o.summary ?? "",
           risks: o.risks ?? "",

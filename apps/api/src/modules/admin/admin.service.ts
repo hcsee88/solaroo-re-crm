@@ -51,6 +51,24 @@ const USER_SELECT = {
 export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
 
+  // ─── Dropdown user list (no permission gate — any authenticated user) ─────────
+  // Returns minimal user data (id, name, email, roleName) for select/autocomplete widgets.
+  // Active users only, sorted by name.
+
+  async listUsersForDropdown(): Promise<{ id: string; name: string; email: string; roleName: string }[]> {
+    const users = await this.prisma.user.findMany({
+      where: { isActive: true },
+      orderBy: { name: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: { select: { name: true } },
+      },
+    });
+    return users.map((u) => ({ id: u.id, name: u.name, email: u.email, roleName: u.role.name }));
+  }
+
   // ─── List users ─────────────────────────────────────────────────────────────
 
   async listUsers(query: UserQueryDto): Promise<PaginatedResult<UserListItem>> {

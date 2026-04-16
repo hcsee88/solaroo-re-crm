@@ -21,6 +21,7 @@ export type RoleName =
   | "SALES_MANAGER"
   | "SALES_ENGINEER"
   | "PROJECT_MANAGER"
+  | "PROJECT_ENGINEER"
   | "DESIGN_LEAD"
   | "DESIGN_ENGINEER"
   | "PROCUREMENT"
@@ -103,6 +104,12 @@ const NAV_BY_ROLE: Record<RoleName, NavHref[]> = {
     "/pmo",
     "/documents",
     "/reports",
+  ],
+
+  PROJECT_ENGINEER: [
+    "/dashboard",
+    "/projects",
+    "/documents",
   ],
 
   DESIGN_LEAD: [
@@ -241,6 +248,25 @@ const ROLES_SEE_ACCOUNTS_COUNT = new Set<RoleName>([
   "DIRECTOR",
   "SALES_MANAGER",
   "SALES_ENGINEER",
+  "FINANCE_ADMIN",
+]);
+
+// ─── Project Health section — visible to all execution roles ─────────────────
+// PROJECT_ENGINEER sees project RAG / gate health but not pipeline or proposals.
+// (Project Health section uses existing project:view:assigned permission;
+//  no separate UI gate needed — but listed here for documentation completeness.)
+const _ROLES_SEE_PROJECT_SECTION = new Set<RoleName>([
+  "DIRECTOR",
+  "PMO_MANAGER",
+  "SALES_MANAGER",
+  "PROJECT_MANAGER",
+  "PROJECT_ENGINEER",
+  "DESIGN_LEAD",
+  "DESIGN_ENGINEER",
+  "PROCUREMENT",
+  "SITE_SUPERVISOR",
+  "COMMISSIONING_ENGINEER",
+  "OM_ENGINEER",
   "FINANCE_ADMIN",
 ]);
 

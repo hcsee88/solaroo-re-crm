@@ -167,29 +167,37 @@ export default function DashboardPage() {
   const { pipeline, proposals, projects, quickCounts, generatedAt } = data;
 
   // How many quick-count cards to show affects the grid columns
-  const quickCountCards = [
-    showAccountsCard && {
+  const quickCountCards: { label: string; value: number; alert?: boolean; href: string }[] = [];
+  if (showAccountsCard) {
+    quickCountCards.push({
       label: "Active Accounts",
       value: quickCounts.activeAccounts,
       href: "/accounts",
-    },
-    showPipeline && {
+    });
+  }
+  if (showPipeline) {
+    quickCountCards.push({
       label: "Active Opportunities",
       value: quickCounts.activeOpportunities,
       href: "/opportunities",
-    },
-    {
-      label: "Active Projects",
-      value: quickCounts.activeProjects,
-      href: "/projects",
-    },
-    showProposals && {
+    });
+  }
+  quickCountCards.push({
+    label: "Active Projects",
+    value: quickCounts.activeProjects,
+    href: "/projects",
+  });
+  if (showProposals) {
+    const pendingCard: { label: string; value: number; alert?: boolean; href: string } = {
       label: "Proposals Pending",
       value: quickCounts.proposalsPendingApproval,
-      alert: quickCounts.proposalsPendingApproval > 0,
       href: "/proposals",
-    },
-  ].filter(Boolean) as { label: string; value: number; alert?: boolean; href: string }[];
+    };
+    if (quickCounts.proposalsPendingApproval > 0) {
+      pendingCard.alert = true;
+    }
+    quickCountCards.push(pendingCard);
+  }
 
   return (
     <div className="space-y-8">
@@ -217,7 +225,7 @@ export default function DashboardPage() {
             key={card.label}
             label={card.label}
             value={card.value}
-            alert={card.alert}
+            {...(card.alert ? { alert: true } : {})}
             href={card.href}
           />
         ))}

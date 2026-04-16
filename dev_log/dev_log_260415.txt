@@ -1,0 +1,95 @@
+================================================================================
+DEV LOG — 2026-04-15
+Solaroo RE CRM | Pekat Teknologi Sdn Bhd
+Session: V1 Hardening — Scope Enforcement + Sensitive Field Stripping
+================================================================================
+
+─── CHANGES MADE ───────────────────────────────────────────────────────────────
+
+1. apps/api/src/common/authz/sensitive-fields.ts
+   CHANGED — Fixed field name mismatch between policy and actual API responses.
+   Old names: estimatedMarginPct, estimatedMarginValue, costBudget
+   New names: marginPercent, estimatedMargin, estimatedCapex, budgetBaseline, marginBaseline
+   Added: estimatedCapex (was missing entirely from policy)
+   Added: marginBaseline (project-level field)
+   estimatedCapex now gated on margin:view_estimated (same audience as margin %)
+
+2. apps/api/src/common/authz/authz.service.ts
+   ADDED — getBestScope(user, resource, action): Promise<Scope | null>
+   Returns highest scope among all user permissions for a resource:action.
+   Precedence: all(4) > team(3) > assigned(2) > own(1) > null.
+   Used in service list methods to determine WHERE clause scope filter.
+
+3. apps/api/src/modules/opportunities/opportunities.service.ts
+   CHANGED — findAll: inject AuthzService, call getBestScope(), apply WHERE clause.
+   CHANGED — findById: call requirePermission() with ownerId + opportunityId.
+   _user parameter renamed to user (now actively used in both methods).
+
+4. apps/api/src/modules/proposals/proposals.service.ts
+   CHANGED — findAll: inject AuthzService, scope filter on createdByUserId /
+             opportunityMember, strip estimatedCapex + marginPercent for roles
+             without margin:view_estimated.
+   CHANGED — findById: add createdByUserId to select, call requirePermission(),
+             strip estimatedCapex + estimatedMargin + marginPercent for roles
+             without margin:view_estimated.
+
+5. apps/api/src/modules/projects/projects.service.ts
+   CHANGED — findAll: inject AuthzService, scope filter on projectManagerId /
+             projectMember, strip budgetBaseline from list items for roles
+             without cost:view.
+   CHANGED — findById: call requirePermission() with ownerId (projectManagerId)
+             + projectId, delete budgetBaseline + actualCostToDate + marginBaseline
+             from response if user lacks cost:view.
+   Added ForbiddenException import.
+
+6. apps/api/src/modules/reporting/reporting.service.ts
+   CHANGED — inject AuthzService, check margin:view_estimated permission.
+   getDashboardMetrics: totalPipelineValue → 0 and byStage[].totalValue → 0
+   for roles without margin:view_estimated (PM, PMO, Design Lead, etc.).
+
+7. docs/v1-product-direction.md
+   CHANGED — Contracts removed from "INCLUDED — Complete enough for V1".
+   ADDED — Contracts now listed in DEFERRED table with explicit rationale.
+   CHANGED — Last updated → 2026-04-15.
+
+8. docs/v1-scope-and-data-control.md
+   CREATED — Full reference doc covering:
+   - Scope hierarchy (all > team > assigned > own)
+   - Scope-to-WHERE mapping
+   - Scope matrix per resource (opportunities, proposals, projects)
+   - Sensitive field policy table (field → permission → who sees it)
+   - Implementation details (AuthzService methods, enforcement points)
+   - List of services NOT yet enforced and rationale
+   - V1 Contracts deferral decision record
+   - Security guarantees checklist
+   - Post-V1 hardening backlog
+
+─── AUDIT FINDINGS (from earlier) ─────────────────────────────────────────────
+
+All issues identified in the pre-implementation audit are now fixed:
+  [FIXED] sensitive-fields.ts field name mismatch
+  [FIXED] AuthzService.getBestScope() missing
+  [FIXED] opportunities.findAll() — no scope filter
+  [FIXED] opportunities.findById() — no record-level access check
+  [FIXED] proposals.findAll() — no scope filter, margin fields unguarded
+  [FIXED] proposals.findById() — no access check, margin fields unguarded
+  [FIXED] projects.findAll() — no scope filter, budgetBaseline unguarded
+  [FIXED] projects.findById() — no access check, cost fields unguarded
+  [FIXED] reporting.getDashboardMetrics() — pipeline RM values exposed to all roles
+  [FIXED] contract:view_value — confirmed present in seed (line 289), was false alarm
+
+─── NOT CHANGED (acceptable for V1) ────────────────────────────────────────────
+
+  AccountsService, ContactsService, SitesService — reference/lookup data
+  ProcurementService — internal ops roles only; all see all procurement
+  DocumentsService — scoped naturally by projectId/opportunityId query params
+
+─── CONTRACTS V1 DECISION ──────────────────────────────────────────────────────
+
+  Decision: DEFERRED
+  Backend schema + permissions seed: ✅ intact (do not delete)
+  Frontend pages: none exist (no work needed)
+  Sidebar: no contracts link anywhere (safe)
+  Docs updated: v1-product-direction.md
+
+================================================================================

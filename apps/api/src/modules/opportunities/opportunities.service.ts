@@ -7,6 +7,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
+import { AuthzService } from '../../common/authz/authz.service';
 import { UserContext, PaginatedResult } from '@solaroo/types';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -104,6 +105,7 @@ export type OpportunityDetail = OpportunityRecord & {
 export class OpportunitiesService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly authz: AuthzService,
     @Inject(forwardRef(() => ProjectsService))
     private readonly projectsService: ProjectsService,
   ) {}
@@ -112,19 +114,48 @@ export class OpportunitiesService {
 
   async findAll(
     query: OpportunityQueryDto,
-    _user: UserContext,
+    user: UserContext,
   ): Promise<PaginatedResult<OpportunityListItem>> {
     const { search, accountId, siteId, ownerUserId, stage, isActive, overdue, page, pageSize, sortBy, sortDir } = query;
 
+    // ── Scope enforcement ──────────────────────────────────────────────────
+    const scope = await this.authz.getBestScope(user, 'opportunity', 'view');
+    if (!scope) throw new ForbiddenException('No permission to view opportunities');
+
+    // Build scope-based filter:
+    //   own      → only where ownerUserId = me
+    //   assigned → ownerUserId = me  OR  OpportunityMember  OR  ProjectMember on linked project
+    //              (PROJECT_ENGINEER is a ProjectMember, not an OpportunityMember)
+    //   team/all → no extra filter (Sales Manager sees their team; Director sees all)
+    const scopeFilter: Prisma.OpportunityWhereInput =
+      scope === 'own'
+        ? { ownerUserId: user.id }
+        : scope === 'assigned'
+          ? {
+              OR: [
+                { ownerUserId: user.id },
+                { members: { some: { userId: user.id } } },
+                // Project-member path: PE/PM are assigned at project level, not opp level
+                { project: { members: { some: { userId: user.id } } } },
+                { project: { projectManagerId: user.id } },
+              ],
+            }
+          : {};
+
     const now = new Date();
-    const where: Prisma.OpportunityWhereInput = {
-      ...(search && {
+    const andFilters: Prisma.OpportunityWhereInput[] = [scopeFilter];
+    if (search) {
+      andFilters.push({
         OR: [
           { title: { contains: search, mode: 'insensitive' } },
           { opportunityCode: { contains: search, mode: 'insensitive' } },
           { account: { name: { contains: search, mode: 'insensitive' } } },
         ],
-      }),
+      });
+    }
+
+    const where: Prisma.OpportunityWhereInput = {
+      AND: andFilters,
       ...(accountId && { accountId }),
       ...(siteId && { siteId }),
       ...(ownerUserId && { ownerUserId }),
@@ -136,6 +167,9 @@ export class OpportunitiesService {
         stage: { notIn: ['WON', 'LOST'] },
       }),
     };
+
+    // ── Sensitive field gate ───────────────────────────────────────────────
+    const canViewValue = await this.authz.hasPermission(user, 'margin', 'view_estimated');
 
     const [total, items] = await Promise.all([
       this.prisma.opportunity.count({ where }),
@@ -151,8 +185,17 @@ export class OpportunitiesService {
       }),
     ]);
 
+    // Strip estimatedValue for roles without pipeline value visibility
+    const mappedItems = (items as OpportunityListItem[]).map((item) => {
+      if (!canViewValue) {
+        const r = item as Record<string, unknown>;
+        delete r['estimatedValue'];
+      }
+      return item;
+    });
+
     return {
-      items: items as OpportunityListItem[],
+      items: mappedItems,
       total,
       page,
       pageSize,
@@ -162,11 +205,13 @@ export class OpportunitiesService {
 
   // ─── Detail ────────────────────────────────────────────────────────────────
 
-  async findById(id: string, _user: UserContext): Promise<OpportunityDetail> {
+  async findById(id: string, user: UserContext): Promise<OpportunityDetail> {
     const opp = await this.prisma.opportunity.findUnique({
       where: { id },
       select: {
         ...OPP_SELECT,
+        // Project ID needed for PE scope check (PE is ProjectMember, not OpportunityMember)
+        project: { select: { id: true } },
         stageHistory: {
           orderBy: { changedAt: 'desc' },
           select: {
@@ -182,9 +227,27 @@ export class OpportunitiesService {
 
     if (!opp) throw new NotFoundException(`Opportunity ${id} not found`);
 
+    // ── Record-level access check ──────────────────────────────────────────
+    await this.authz.requirePermission(user, 'opportunity', 'view', {
+      ownerId:       opp.ownerUserId,
+      opportunityId: id,
+      projectId:     opp.project?.id,   // allows PE/PM to pass via ProjectMember check
+    });
+
+    // ── Sensitive field: estimatedValue ────────────────────────────────────
+    // estimatedValue (estimated contract value / deal size) is commercially
+    // sensitive. Execution roles (PE, PM, PMO, Design, Procurement, Site etc.)
+    // should not see pipeline deal values — they work from project scope only.
+    // UI already hides this via canSeeOpportunityValue(); enforce at backend too.
+    const canViewValue = await this.authz.hasPermission(user, 'margin', 'view_estimated');
+    const record = opp as unknown as Record<string, unknown>;
+    if (!canViewValue) {
+      delete record['estimatedValue'];
+    }
+
     const allowedNextStages = OPPORTUNITY_STAGE_TRANSITIONS[opp.stage].allowedNext as OpportunityStage[];
 
-    return { ...(opp as unknown as OpportunityRecord), stageHistory: opp.stageHistory, allowedNextStages };
+    return { ...(record as unknown as OpportunityRecord), stageHistory: opp.stageHistory, allowedNextStages };
   }
 
   // ─── Create ────────────────────────────────────────────────────────────────

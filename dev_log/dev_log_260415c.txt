@@ -1,0 +1,121 @@
+Dev Log — 2026-04-15 (c)
+Session: Global Search Implementation
+========================================
+
+FEATURE: Global Search (⌘K Command Palette)
+---------------------------------------------
+
+PROBLEM
+The TopBar search pill was a styled, non-functional <button> with no onClick handler,
+no state, and no API call. Clicking or pressing ⌘K did nothing.
+
+SOLUTION
+Implemented a full global search with:
+  - Backend: NestJS SearchModule (GET /search?q=...)
+  - Frontend: SearchModal command-palette component
+  - TopBar wired up with onClick and ⌘K/Ctrl+K global shortcut
+
+========================================
+BACKEND — apps/api/src/modules/search/
+========================================
+
+NEW FILES
+  search.service.ts    — Queries 6 resources, scope-aware, 5 results per group
+  search.controller.ts — GET /search?q= with ZodValidationPipe, requires auth
+  search.module.ts     — Module registration
+
+MODIFIED
+  app.module.ts        — SearchModule added to imports array
+
+SEARCH COVERAGE
+  Resource      Searched fields                     Scope enforcement
+  ------------- ----------------------------------- ----------------------------
+  Account       name, accountCode, industry, region  any (no scope filter; all roles with account:view get all)
+  Contact       firstName, lastName, email,          any
+                jobTitle, phone
+  Site          name, siteCode, address, region      any
+  Opportunity   title, opportunityCode, summary,     own / assigned / team / all
+                account.name
+  Proposal      title, proposalCode,                 own / assigned / team / all
+                opportunity.account.name
+  Project       name, projectCode, account.name      assigned / all
+
+SCOPE FILTERS (match exactly what service layer uses)
+  Opportunity: own → ownerUserId=me; assigned → ownerUserId OR members.userId; team → owner.role.name
+  Proposal:    own → createdByUserId=me; assigned → opportunity.(ownerUserId OR members.userId)
+  Project:     assigned → projectManagerId OR members.userId
+
+RESPONSE SHAPE
+  {
+    query: string,
+    total: number,
+    groups: [
+      { type, label, items: [{ id, type, code, title, subtitle, url }] }
+    ]
+  }
+  Groups ordered: opportunities → projects → proposals → accounts → contacts → sites
+  Empty groups are omitted. 5 results max per group.
+
+SCHEMA FIXES (verified against Prisma schema before writing)
+  - Contact uses firstName/lastName (not name); accounts via AccountContact[]
+  - Opportunity owner field is ownerUserId (not ownerId)
+  - Proposal uses createdByUserId; account goes through opportunity.account
+  - OpportunityMember.userId, ProjectMember.userId confirmed in auth.prisma
+  - Site.address, Site.account direct relation confirmed
+
+========================================
+FRONTEND — apps/web/src/components/layout/
+========================================
+
+NEW FILE
+  search-modal.tsx  (~210 lines)
+
+FEATURES
+  - Full-screen backdrop with modal panel (max-w-xl, top: 15vh)
+  - Auto-focus input on open; clears state on each open
+  - 280ms debounce before API call (avoids hammering API while typing)
+  - Loading spinner replaces search icon while fetching
+  - Grouped results: label + count badge per group
+  - Each result: type icon bubble (color-coded) + title + code chip + subtitle
+  - Keyboard navigation: ↑↓ moves activeIndex, ↵ opens record, Esc closes
+  - Mouse hover also sets activeIndex (synced with keyboard)
+  - Active item: blue tinted background + colored left border + ↵ hint
+  - Empty state: icon + "No results for X" + tip text
+  - Prompt state: "Type at least 2 characters" when input is empty
+  - Error state: red message if API fails
+  - Footer bar: result count + keyboard hint legend (↑↓ / ↵ / Esc)
+
+RESULT ICONS & COLORS
+  account     → Building2   #0073ea (blue)
+  contact     → User        #a25ddc (purple)
+  site        → MapPin      #00ca72 (green)
+  opportunity → TrendingUp  #fdab3d (amber)
+  proposal    → FileText    #579bfc (sky blue)
+  project     → FolderKanban #e2445c (red)
+
+MODIFIED FILE
+  topbar.tsx
+    - Added: import { useState, useEffect } from "react" (useEffect was missing)
+    - Added: import { SearchModal } from "./search-modal"
+    - Added: searchOpen state
+    - Added: useEffect for ⌘K / Ctrl+K global keyboard shortcut
+    - Added: onClick={() => setSearchOpen(true)} to the search button
+    - Added: <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
+
+========================================
+QA NOTES
+========================================
+  - TypeScript: 0 errors on both apps/api and apps/web after implementation
+  - AuthzService is @Global() — no import needed in SearchModule
+  - PrismaService is @Global() — no import needed in SearchModule
+  - Promise.allSettled used: one slow/failing resource doesn't block others
+  - All 6 search methods return [] on scope=null (user has no view permission)
+  - Scope filter for 'all' scope = {} (no filter), which is correct Prisma behavior
+
+========================================
+NEXT SUGGESTED TASKS
+========================================
+  A. Scope enforcement fixes (pending from audit)
+  B. Sensitive field stripping fixes (pending from audit)
+  C. Notifications bell — currently decorative (no onClick/data)
+  D. Dashboard widgets with real data

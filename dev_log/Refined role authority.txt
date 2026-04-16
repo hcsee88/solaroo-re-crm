@@ -1,12 +1,69 @@
 Refined role authority
+Updated: 2026-04-15 (PROJECT_ENGINEER added)
+
 Role	Primary Domain	Key Constraints
 Director	Everything	Broad read + all approvals + margin actual. All sensitive actions audited.
-Sales Manager	CRM pipeline	Team-scoped edit on opps/proposals. Estimated margin only (team). Can approve proposals. No project finance.
+Sales Manager	CRM pipeline	Team-scoped edit on opps/proposals. Estimated margin only (team). Can approve proposals (order 1). No project finance.
 Sales Engineer	Own pipeline	Own-scoped create/edit on opps, assessments, proposal drafts. Submit but not approve. Estimated margin own only.
-Project Manager	Assigned projects	Full edit on assigned project scope. Gate closure submit (not approve). No commercial margin or finance.
-Design Engineer	Technical docs	Create/edit/submit on tech assessments, DBD, drawings. Read-only on commercial.
-Procurement	Vendors/POs	Full PO workflow but approve_po requires separate permission (Director or delegated).
+Project Manager	Assigned projects	Full edit on assigned project scope. Gate submit (not approve). Can view budget baseline and cost-to-date. No commercial margin or invoice data.
+Project Engineer	Execution coordination	Assigned-scope only. Gate prepare + submit (not approve). Full milestone/issue/risk create+edit. Full document upload/revise/submit (not approve). No CAPEX, no margin, no budget, no contracts. Zero visibility outside assigned projects.
+PMO Manager	Portfolio governance	View all projects, gates, milestones, issues, risks across portfolio. Can approve/reject gates. No commercial data (margins, costs, contracts, invoices).
+Design Lead	Design department head	Leads technical review, approves DBDs and drawings. View all opportunities/proposals. Can approve documents. Senior to Design Engineer.
+Design Engineer	Technical docs	Create/edit/submit on tech assessments, DBD, drawings. Read-only on commercial. Assigned-scope on projects.
+Procurement	Vendors/POs	Full PO workflow on assigned projects. Approve PO requires Director or delegated authority. No commercial margin.
 Site Supervisor	Field execution	Create/edit site logs, checklists, punch lists on assigned projects. No commercial.
-Commissioning Engineer	Handover/assets	Create/edit testing sheets, handover docs, asset register. Submit for approval.
+Commissioning Engineer	Handover/assets	Create/edit testing sheets, handover docs, asset register. Submit for approval. No commercial.
 O&M Engineer	Assets/maintenance	Full edit on maintenance/tickets/warranty. Read-only on project history and handover docs.
 Finance Admin	Contracts/finance	View/edit contracts, invoices, payment status. View actual margin. User list view only.
+
+==========================================
+SENSITIVE FIELD ACCESS MATRIX
+==========================================
+Field                | Roles that can see it
+---------------------+------------------------------------------------------
+Estimated CAPEX      | Director, Sales Manager, Finance Admin, Sales Engineer (own only)
+Margin % (estimated) | Director, Sales Manager, Finance Admin, Sales Engineer (own only)
+Margin value (est.)  | Director, Sales Manager, Finance Admin, Sales Engineer (own only)
+Margin (actual)      | Director, Finance Admin
+Budget baseline      | Director, Finance Admin, Project Manager (assigned)
+Actual cost to date  | Director, Finance Admin, Project Manager (assigned)
+Contract value       | Director, Finance Admin, Sales Manager
+Payment status       | Director, Finance Admin
+Pipeline value (dash)| Director, Sales Manager
+
+==========================================
+APPROVAL AUTHORITY MATRIX
+==========================================
+Action               | Approved by
+---------------------+------------------------------------------------------
+Proposal             | Sales Manager (order 1) → Director (order 2 or 1 if no SM)
+Gate G1–G6           | Director, PMO Manager
+Document             | Director, Design Lead, Project Manager (assigned)
+Punch list           | Director, Project Manager (assigned)
+Testing sheet        | Director, Project Manager (assigned)
+Handover doc         | Director, Project Manager (assigned)
+Asset register       | Director, Project Manager (assigned)
+Purchase order       | Director, Finance Admin
+Contract             | Director
+
+==========================================
+SCOPE DEFINITIONS
+==========================================
+Scope      | Meaning
+-----------+-----------------------------------------------------------------
+own        | Records created by or owned by this user
+assigned   | Records explicitly linked to user (OpportunityMember, ProjectMember)
+team       | Records owned by anyone with the same role (Sales team for Sales Manager)
+all        | All records in the system regardless of ownership
+
+Note: All permissions default to most restrictive. A role sees nothing unless
+a permission entry explicitly grants access. Backend enforces; UI reflects.
+
+==========================================
+ROLES THAT CANNOT SEE PROPOSAL FINANCIALS
+==========================================
+Project Manager, Project Engineer, PMO Manager, Design Lead, Design Engineer,
+Procurement, Site Supervisor, Commissioning Engineer, O&M Engineer.
+
+These roles may have proposal:view:assigned but the API strips estimatedCapex,
+marginPercent, and estimatedMargin from the response before returning.

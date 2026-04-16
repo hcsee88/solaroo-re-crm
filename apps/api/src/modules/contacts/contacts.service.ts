@@ -2,8 +2,10 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
+import { AuthzService } from '../../common/authz/authz.service';
 import { UserContext, PaginatedResult } from '@solaroo/types';
 import { CreateContactDto, UpdateContactDto, UpdateAccountLinkDto, ContactQueryDto } from './contacts.dto';
 import { Prisma } from '@solaroo/db';
@@ -36,25 +38,164 @@ export type ContactDetail = ContactListItem & {
 
 @Injectable()
 export class ContactsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authz: AuthzService,
+  ) {}
+
+  private async buildScopeFilter(
+    user: UserContext,
+    action: 'view' | 'edit',
+  ): Promise<Prisma.ContactWhereInput> {
+    const scope = await this.authz.getBestScope(user, 'contact', action);
+    if (!scope) {
+      throw new ForbiddenException(`No permission to ${action} contacts`);
+    }
+
+    const teamAccountScope: Prisma.ContactWhereInput = {
+      accounts: {
+        some: {
+          account: {
+            opportunities: {
+              some: { owner: { role: { name: user.roleName } } },
+            },
+          },
+        },
+      },
+    };
+    const ownAccountScope: Prisma.ContactWhereInput = {
+      accounts: {
+        some: {
+          account: {
+            opportunities: {
+              some: { ownerUserId: user.id },
+            },
+          },
+        },
+      },
+    };
+    const assignedAccountScope: Prisma.ContactWhereInput = {
+      accounts: {
+        some: {
+          account: {
+            OR: [
+              {
+                opportunities: {
+                  some: {
+                    OR: [
+                      { ownerUserId: user.id },
+                      { members: { some: { userId: user.id } } },
+                    ],
+                  },
+                },
+              },
+              {
+                projects: {
+                  some: {
+                    OR: [
+                      { projectManagerId: user.id },
+                      { members: { some: { userId: user.id } } },
+                    ],
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+    };
+    const assignedSiteScope: Prisma.ContactWhereInput = {
+      sitesPrimary: {
+        some: {
+          OR: [
+            {
+              opportunities: {
+                some: {
+                  OR: [
+                    { ownerUserId: user.id },
+                    { members: { some: { userId: user.id } } },
+                  ],
+                },
+              },
+            },
+            {
+              projects: {
+                some: {
+                  OR: [
+                    { projectManagerId: user.id },
+                    { members: { some: { userId: user.id } } },
+                  ],
+                },
+              },
+            },
+          ],
+        },
+      },
+    };
+
+    switch (scope) {
+      case 'all':
+        return {};
+      case 'team':
+        return {
+          OR: [
+            teamAccountScope,
+            {
+              sitesPrimary: {
+                some: {
+                  opportunities: {
+                    some: { owner: { role: { name: user.roleName } } },
+                  },
+                },
+              },
+            },
+          ],
+        };
+      case 'own':
+        return {
+          OR: [
+            ownAccountScope,
+            {
+              sitesPrimary: {
+                some: {
+                  opportunities: {
+                    some: { ownerUserId: user.id },
+                  },
+                },
+              },
+            },
+          ],
+        };
+      case 'assigned':
+        return {
+          OR: [assignedAccountScope, assignedSiteScope],
+        };
+    }
+  }
 
   // ─── List ──────────────────────────────────────────────────────────────────
 
   async findAll(
     query: ContactQueryDto,
-    _user: UserContext,
+    user: UserContext,
   ): Promise<PaginatedResult<ContactListItem>> {
     const { search, accountId, isActive, page, pageSize, sortBy, sortDir } = query;
+    const scopeFilter = await this.buildScopeFilter(user, 'view');
+    const andFilters: Prisma.ContactWhereInput[] = [scopeFilter];
 
-    const where: Prisma.ContactWhereInput = {
-      ...(search && {
+    if (search) {
+      andFilters.push({
         OR: [
           { firstName: { contains: search, mode: 'insensitive' } },
           { lastName: { contains: search, mode: 'insensitive' } },
           { email: { contains: search, mode: 'insensitive' } },
           { jobTitle: { contains: search, mode: 'insensitive' } },
         ],
-      }),
+      });
+    }
+
+    const where: Prisma.ContactWhereInput = {
+      AND: andFilters,
       ...(accountId && {
         accounts: { some: { accountId } },
       }),
@@ -102,9 +243,10 @@ export class ContactsService {
 
   // ─── Detail ────────────────────────────────────────────────────────────────
 
-  async findById(id: string, _user: UserContext): Promise<ContactDetail> {
-    const contact = await this.prisma.contact.findUnique({
-      where: { id },
+  async findById(id: string, user: UserContext): Promise<ContactDetail> {
+    const scopeFilter = await this.buildScopeFilter(user, 'view');
+    const contact = await this.prisma.contact.findFirst({
+      where: { id, ...scopeFilter },
       select: {
         id: true,
         firstName: true,
@@ -182,7 +324,12 @@ export class ContactsService {
   // ─── Update ────────────────────────────────────────────────────────────────
 
   async update(id: string, dto: UpdateContactDto, _user: UserContext): Promise<ContactDetail> {
-    await this.findById(id, _user);
+    const scopeFilter = await this.buildScopeFilter(_user, 'edit');
+    const existing = await this.prisma.contact.findFirst({
+      where: { id, ...scopeFilter },
+      select: { id: true },
+    });
+    if (!existing) throw new NotFoundException(`Contact ${id} not found`);
 
     const { accountId, isPrimary, relationship, ...contactData } = dto;
 
@@ -234,8 +381,15 @@ export class ContactsService {
     contactId: string,
     accountId: string,
     dto: UpdateAccountLinkDto,
-    _user: UserContext,
+    user: UserContext,
   ): Promise<ContactDetail> {
+    const scopeFilter = await this.buildScopeFilter(user, 'edit');
+    const allowed = await this.prisma.contact.findFirst({
+      where: { id: contactId, ...scopeFilter },
+      select: { id: true },
+    });
+    if (!allowed) throw new NotFoundException(`Contact ${contactId} not found`);
+
     const existing = await this.prisma.accountContact.findUnique({
       where: { accountId_contactId: { accountId, contactId } },
     });
@@ -249,7 +403,7 @@ export class ContactsService {
       },
     });
 
-    return this.findById(contactId, _user);
+    return this.findById(contactId, user);
   }
 
   // ─── Remove account link ───────────────────────────────────────────────────
@@ -257,8 +411,15 @@ export class ContactsService {
   async removeAccountLink(
     contactId: string,
     accountId: string,
-    _user: UserContext,
+    user: UserContext,
   ): Promise<ContactDetail> {
+    const scopeFilter = await this.buildScopeFilter(user, 'edit');
+    const allowed = await this.prisma.contact.findFirst({
+      where: { id: contactId, ...scopeFilter },
+      select: { id: true },
+    });
+    if (!allowed) throw new NotFoundException(`Contact ${contactId} not found`);
+
     const existing = await this.prisma.accountContact.findUnique({
       where: { accountId_contactId: { accountId, contactId } },
     });
@@ -268,7 +429,7 @@ export class ContactsService {
       where: { accountId_contactId: { accountId, contactId } },
     });
 
-    return this.findById(contactId, _user);
+    return this.findById(contactId, user);
   }
 
   // ─── Link to account (legacy) ─────────────────────────────────────────────

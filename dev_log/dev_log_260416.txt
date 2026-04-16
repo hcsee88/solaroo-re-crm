@@ -1,0 +1,184 @@
+Dev Log — 2026-04-16
+Session: PROJECT_ENGINEER Security Fixes (R1–R10 from audit)
+=============================================================
+
+CONTEXT
+-------
+Yesterday's audit (dev_log_260415d.txt) identified 10 risks in the
+PROJECT_ENGINEER role implementation. This session applies all fixes.
+R3 and R4 were already implemented (found in service on review).
+R1, R2, R5, R6, R7, R8, R9, R10 applied this session.
+
+=============================================================
+FIX 1 — Project Edit Field Guard  (R1, R2, R5, R8, R9)
+=============================================================
+
+FILE: apps/api/src/modules/projects/projects.service.ts
+METHOD: update()
+
+PROBLEM
+  project:edit:assigned was granted to both PROJECT_MANAGER and
+  PROJECT_ENGINEER. The update() method spread the entire UpdateProjectDto
+  directly into Prisma with no role-based field filtering. PE could:
+    - Reassign the project manager (projectManagerId)
+    - Write budget fields (budgetBaseline, budgetUpdated) despite having
+      zero budget read access
+    - Mark projects COMPLETED / CANCELLED (status)
+    - Change staffing leads (designLeadId, procurementLeadId)
+    - Write PMO governance notes (pmoStatusNote, lastPmoReviewAt)
+
+FIX
+  Added role check before Prisma call in update():
+
+    Privileged roles: DIRECTOR, PMO_MANAGER, PROJECT_MANAGER
+    If caller is NOT privileged AND dto contains any restricted field → 403
+
+  Restricted fields:
+    projectManagerId    — changes project ownership
+    designLeadId        — staffing assignment
+    procurementLeadId   — staffing assignment
+    budgetBaseline      — commercial/budget (PE has zero budget visibility)
+    budgetUpdated       — commercial/budget
+    status              — governance (COMPLETED/CANCELLED require authority)
+    pmoStatusNote       — PMO governance
+    lastPmoReviewAt     — PMO governance
+
+  PE-safe writable fields (unchanged):
+    name, notes, ragStatus, currentBlocker, blockerOwnerId,
+    blockerDueDate, startDate, targetCod, actualCod
+
+  Error message: "Your role (PROJECT_ENGINEER) is not permitted to modify: <fields>"
+  Client gets explicit 403, not a silent no-op.
+
+=============================================================
+FIX 2 — Gate + Deliverable Approval Authority  (R3, R4)
+=============================================================
+
+STATUS: Already implemented. Found in service on review.
+
+  updateGateStatus(): uses requirePermission('project_gate', 'approve')
+    before allowing APPROVED or REJECTED status transitions
+  updateDeliverable(): same check before APPROVED
+
+  No changes required.
+
+=============================================================
+FIX 3 — commercialSummary Stripping  (R6)
+=============================================================
+
+FILE: apps/api/src/modules/proposals/proposals.service.ts
+METHOD: findById()
+
+PROBLEM
+  commercialSummary is free-text authored by Sales Engineers.
+  Routinely contains sentences like "CAPEX ~RM 2.1M, targeting 18%
+  margin, client budget RM 2.5M." Was returned unfiltered to all roles
+  including PE, PM, PMO.
+
+FIX
+  Gated on canViewMargin (margin:view_estimated permission):
+
+    commercialSummary: canViewMargin ? v.commercialSummary : null
+
+  Frontend: conditional block `{version.commercialSummary && (...)}` —
+  renders nothing when null. No UI changes needed.
+
+=============================================================
+FIX 4 — Proposal Scope for PROJECT_ENGINEER  (R7)
+=============================================================
+
+FILE: apps/api/src/modules/proposals/proposals.service.ts
+
+PROBLEM
+  PE is assigned to projects via ProjectMember, NOT OpportunityMember.
+  The proposal scope filter only checked OpportunityMember.
+  PE added as ProjectMember only → saw zero proposals in list views.
+  findById() only passed opportunityId in scope context → ProjectMember
+  check in scopeCoversRecord was never reached.
+
+FIX A — findAll() assigned scope filter
+  Added two new OR branches:
+    { opportunity: { project: { members: { some: { userId: user.id } } } } }
+    { opportunity: { project: { projectManagerId: user.id } } }
+
+  PE now sees proposals for any project they're a ProjectMember on.
+  Resolves via: Proposal → Opportunity → Project → ProjectMember
+
+FIX B — findById() scope context
+  Added `project: { select: { id: true } }` to the opportunity select.
+  Scope context now passes:
+    opportunityId: p.opportunity.id
+    projectId:     p.opportunity.project?.id   ← NEW
+
+  scopeCoversRecord 'assigned' case:
+    checks projectMember(projectId, userId) if projectId is present.
+  PE is now granted record-level access via ProjectMember path.
+
+=============================================================
+FIX 5 — estimatedSavings + paybackYears Stripping  (R10)
+=============================================================
+
+FILE: apps/api/src/modules/proposals/proposals.service.ts
+METHOD: findById()
+
+PROBLEM
+  estimatedSavings (e.g. RM 680,000/yr) and paybackYears (e.g. 3.1 yrs)
+  were returned to all roles with no permission gate.
+  Combined, they strongly imply CAPEX and margin context (economically
+  revealing even without the three explicitly gated fields).
+
+DECISION
+  Gate both fields on margin:view_estimated — same as CAPEX/margin.
+  Execution roles (PE, PM, PMO, Design, Site, Procurement) receive null.
+  Commercial roles (Director, Sales Manager, Sales Engineer, Finance Admin)
+  receive the values as before.
+
+FIX
+  estimatedSavings: canViewMargin ? (v.estimatedSavings?.toString() ?? null) : null
+  paybackYears:     canViewMargin ? (v.paybackYears?.toString() ?? null) : null
+
+  Frontend null handling:
+    formatMYR(null) → "—"   (line 89: if (!val) return "—")
+    paybackYears ternary → "—"   (already guarded)
+  No UI changes needed.
+
+=============================================================
+VERIFICATION
+=============================================================
+
+TypeScript: 0 errors on apps/api after all changes
+Frontend:   No changes required — all fields already type string | null
+            and UI renders gracefully on null
+
+Scope of changes:
+  MODIFIED
+    apps/api/src/modules/projects/projects.service.ts   (field guard in update)
+    apps/api/src/modules/proposals/proposals.service.ts (scope + stripping)
+
+=============================================================
+COMPLETE AUDIT STATUS
+=============================================================
+
+  Risk  | Description                              | Status
+  ------+------------------------------------------+------------------
+  R1    | PE can change projectManagerId           | FIXED
+  R2    | PE can write budgetBaseline/budgetUpdated | FIXED
+  R3    | PE can approve gates                     | Already fixed
+  R4    | PE can approve deliverables              | Already fixed
+  R5    | PE can cancel/complete project           | FIXED
+  R6    | commercialSummary exposed to PE          | FIXED
+  R7    | Proposal scope doesn't traverse PM path  | FIXED
+  R8    | PE can write PMO governance fields       | FIXED
+  R9    | PE can change staffing leads             | FIXED
+  R10   | estimatedSavings/paybackYears exposed    | FIXED (gated)
+
+  All 10 risks resolved.
+
+=============================================================
+PENDING (carried from previous sessions)
+=============================================================
+  - Scope enforcement fixes (earlier audit — other roles)
+  - Sensitive field stripping fixes (earlier audit — other roles)
+  - docs/v1-scope-and-data-control.md
+  - Notifications bell — currently decorative
+  - Dashboard widgets with real data

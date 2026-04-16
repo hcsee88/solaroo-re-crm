@@ -4,6 +4,102 @@ import { seedPermissions } from "./seeds/permissions.seed";
 
 const prisma = new PrismaClient();
 
+async function syncDemoMemberships() {
+  const users = await prisma.user.findMany({
+    where: {
+      email: {
+        in: [
+          "projectmanager@pekatgroup.com",
+          "projectengineer@pekatgroup.com",
+          "designengineer@pekatgroup.com",
+          "procurement@pekatgroup.com",
+          "sitesupervisor@pekatgroup.com",
+          "commissioneng@pekatgroup.com",
+          "omengineer@pekatgroup.com",
+        ],
+      },
+    },
+    select: { id: true, email: true },
+  });
+
+  const userByEmail = new Map(users.map((user) => [user.email, user.id]));
+  const projectManagerId = userByEmail.get("projectmanager@pekatgroup.com");
+  if (!projectManagerId) {
+    console.log("Demo membership sync skipped: Project Manager test user not found");
+    return;
+  }
+
+  const demoProject = await prisma.project.findFirst({
+    where: {
+      OR: [{ projectManagerId }, { status: "ACTIVE" }],
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, opportunityId: true },
+  });
+
+  if (!demoProject) {
+    console.log("Demo membership sync skipped: no project fixture found");
+    return;
+  }
+
+  const projectMembers = [
+    ["projectengineer@pekatgroup.com", "ENGINEER"],
+    ["designengineer@pekatgroup.com", "ENGINEER"],
+    ["procurement@pekatgroup.com", "PROCUREMENT"],
+    ["sitesupervisor@pekatgroup.com", "SITE_SUPERVISOR"],
+    ["commissioneng@pekatgroup.com", "COMMISSIONING"],
+    ["omengineer@pekatgroup.com", "OM"],
+  ] as const;
+
+  for (const [email, memberRole] of projectMembers) {
+    const userId = userByEmail.get(email);
+    if (!userId) continue;
+
+    await prisma.projectMember.upsert({
+      where: {
+        projectId_userId: {
+          projectId: demoProject.id,
+          userId,
+        },
+      },
+      update: { memberRole },
+      create: {
+        projectId: demoProject.id,
+        userId,
+        memberRole,
+      },
+    });
+  }
+
+  const opportunityMembers = [
+    ["projectmanager@pekatgroup.com", "PM"],
+    ["projectengineer@pekatgroup.com", "ENGINEER"],
+    ["designengineer@pekatgroup.com", "ENGINEER"],
+  ] as const;
+
+  for (const [email, memberRole] of opportunityMembers) {
+    const userId = userByEmail.get(email);
+    if (!userId) continue;
+
+    await prisma.opportunityMember.upsert({
+      where: {
+        opportunityId_userId: {
+          opportunityId: demoProject.opportunityId,
+          userId,
+        },
+      },
+      update: { memberRole },
+      create: {
+        opportunityId: demoProject.opportunityId,
+        userId,
+        memberRole,
+      },
+    });
+  }
+
+  console.log(`Demo memberships synced for project ${demoProject.id}`);
+}
+
 async function main() {
   console.log("Seeding database...");
 
@@ -15,6 +111,7 @@ async function main() {
     { name: "SALES_MANAGER",           displayName: "Sales Manager" },
     { name: "SALES_ENGINEER",          displayName: "Sales Engineer" },
     { name: "PROJECT_MANAGER",         displayName: "Project Manager" },
+    { name: "PROJECT_ENGINEER",        displayName: "Project Engineer",       description: "Execution coordinator under Project Manager — tracks deliverables, coordinates documents, logs issues/risks, supports gate submissions. No commercial or approval access." },
     { name: "DESIGN_LEAD",             displayName: "Design Lead",            description: "Head of Design department — leads technical review, approves DBDs and drawings" },
     { name: "DESIGN_ENGINEER",         displayName: "Design Engineer" },
     { name: "PROCUREMENT",             displayName: "Procurement" },
@@ -59,6 +156,7 @@ async function main() {
     { name: "Sales Manager (Test)",            email: "salesmanager@pekatgroup.com",    roleName: "SALES_MANAGER" },
     { name: "Sales Engineer (Test)",           email: "salesengineer@pekatgroup.com",   roleName: "SALES_ENGINEER" },
     { name: "Project Manager (Test)",          email: "projectmanager@pekatgroup.com",  roleName: "PROJECT_MANAGER" },
+    { name: "Project Engineer (Test)",         email: "projectengineer@pekatgroup.com", roleName: "PROJECT_ENGINEER" },
     { name: "Design Lead (Test)",              email: "designlead@pekatgroup.com",      roleName: "DESIGN_LEAD" },
     { name: "Design Engineer (Test)",          email: "designengineer@pekatgroup.com",  roleName: "DESIGN_ENGINEER" },
     { name: "Procurement (Test)",              email: "procurement@pekatgroup.com",     roleName: "PROCUREMENT" },
@@ -77,6 +175,8 @@ async function main() {
     });
   }
   console.log(`✓ ${testUsers.length} test users seeded (password: Test@1234)`);
+
+  await syncDemoMemberships();
 
   console.log("Seed complete.");
 }

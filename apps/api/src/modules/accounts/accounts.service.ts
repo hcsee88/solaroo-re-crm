@@ -2,8 +2,10 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
+import { AuthzService } from '../../common/authz/authz.service';
 import { UserContext, PaginatedResult } from '@solaroo/types';
 import {
   CreateAccountDto,
@@ -57,25 +59,86 @@ export type AccountDetail = {
 
 @Injectable()
 export class AccountsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authz: AuthzService,
+  ) {}
+
+  private async buildScopeFilter(
+    user: UserContext,
+    action: 'view' | 'edit',
+  ): Promise<Prisma.AccountWhereInput> {
+    const scope = await this.authz.getBestScope(user, 'account', action);
+    if (!scope) {
+      throw new ForbiddenException(`No permission to ${action} accounts`);
+    }
+
+    switch (scope) {
+      case 'all':
+        return {};
+      case 'team':
+        return {
+          opportunities: {
+            some: { owner: { role: { name: user.roleName } } },
+          },
+        };
+      case 'own':
+        return {
+          opportunities: {
+            some: { ownerUserId: user.id },
+          },
+        };
+      case 'assigned':
+        return {
+          OR: [
+            {
+              opportunities: {
+                some: {
+                  OR: [
+                    { ownerUserId: user.id },
+                    { members: { some: { userId: user.id } } },
+                  ],
+                },
+              },
+            },
+            {
+              projects: {
+                some: {
+                  OR: [
+                    { projectManagerId: user.id },
+                    { members: { some: { userId: user.id } } },
+                  ],
+                },
+              },
+            },
+          ],
+        };
+    }
+  }
 
   // ─── List ──────────────────────────────────────────────────────────────────
 
   async findAll(
     query: AccountQueryDto,
-    _user: UserContext,
+    user: UserContext,
   ): Promise<PaginatedResult<AccountListItem>> {
     const { search, type, isActive, page, pageSize, sortBy, sortDir } = query;
+    const scopeFilter = await this.buildScopeFilter(user, 'view');
+    const andFilters: Prisma.AccountWhereInput[] = [scopeFilter];
 
-    const where: Prisma.AccountWhereInput = {
-      ...(search && {
+    if (search) {
+      andFilters.push({
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
           { accountCode: { contains: search, mode: 'insensitive' } },
           { industry: { contains: search, mode: 'insensitive' } },
           { region: { contains: search, mode: 'insensitive' } },
         ],
-      }),
+      });
+    }
+
+    const where: Prisma.AccountWhereInput = {
+      AND: andFilters,
       ...(type && { type }),
       ...(isActive !== undefined && { isActive }),
     };
@@ -119,9 +182,10 @@ export class AccountsService {
 
   // ─── Detail ────────────────────────────────────────────────────────────────
 
-  async findById(id: string, _user: UserContext): Promise<AccountDetail> {
-    const account = await this.prisma.account.findUnique({
-      where: { id },
+  async findById(id: string, user: UserContext): Promise<AccountDetail> {
+    const scopeFilter = await this.buildScopeFilter(user, 'view');
+    const account = await this.prisma.account.findFirst({
+      where: { id, ...scopeFilter },
       select: {
         id: true,
         accountCode: true,
@@ -201,9 +265,16 @@ export class AccountsService {
   async update(
     id: string,
     dto: UpdateAccountDto,
-    _user: UserContext,
+    user: UserContext,
   ): Promise<AccountDetail> {
-    await this.findById(id, _user); // ensure exists
+    const scopeFilter = await this.buildScopeFilter(user, 'edit');
+    const existing = await this.prisma.account.findFirst({
+      where: { id, ...scopeFilter },
+      select: { id: true },
+    });
+    if (!existing) {
+      throw new NotFoundException(`Account ${id} not found`);
+    }
 
     const account = await this.prisma.account.update({
       where: { id },

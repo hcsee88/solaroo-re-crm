@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
+import { AuthzService } from '../../common/authz/authz.service';
 import { UserContext } from '@solaroo/types';
 
 // ─── Response Types ────────────────────────────────────────────────────────────
@@ -60,9 +61,12 @@ export type DashboardMetrics = {
 
 @Injectable()
 export class ReportingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authz: AuthzService,
+  ) {}
 
-  async getDashboardMetrics(_user: UserContext): Promise<DashboardMetrics> {
+  async getDashboardMetrics(user: UserContext): Promise<DashboardMetrics> {
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
@@ -182,16 +186,24 @@ export class ReportingService {
       }),
     ]);
 
+    // ── Commercial field gate ───────────────────────────────────────────────
+    // Pipeline RM values (totalPipelineValue, byStage[].totalValue) are only
+    // shown to roles with margin:view_estimated permission (Directors, Sales
+    // Managers, Finance Admin). Everyone else sees counts only.
+    const canViewPipelineValue = await this.authz.hasPermission(user, 'margin', 'view_estimated');
+
     // ── Pipeline metrics ────────────────────────────────────────────────────
     const byStage: OpportunityByStage[] = opportunitiesByStage.map((row) => ({
       stage: row.stage,
       count: row._count.id,
-      totalValue: Number(row._sum.estimatedValue ?? 0),
+      totalValue: canViewPipelineValue ? Number(row._sum.estimatedValue ?? 0) : 0,
     }));
 
     const pipeline: PipelineMetrics = {
       totalActiveOpportunities: opportunityAggregates._count.id,
-      totalPipelineValue: Number(opportunityAggregates._sum.estimatedValue ?? 0),
+      totalPipelineValue: canViewPipelineValue
+        ? Number(opportunityAggregates._sum.estimatedValue ?? 0)
+        : 0,
       overdueNextActions,
       staleOpportunities,
       byStage,
@@ -244,7 +256,7 @@ export class ReportingService {
 
   // ─── PMO Portfolio Metrics ─────────────────────────────────────────────────
 
-  async getPmoMetrics(_user: UserContext) {
+  async getPmoMetrics(_user: UserContext) { // eslint-disable-line @typescript-eslint/no-unused-vars
     const now = new Date();
     const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
 

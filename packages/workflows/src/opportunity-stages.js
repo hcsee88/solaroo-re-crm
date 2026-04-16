@@ -1,50 +1,53 @@
 "use strict";
 // Defines valid opportunity stage transitions.
-// A stage can only move to stages listed in its `allowedNext` array.
-// Terminal stages (WON, LOST) have no forward transitions.
+// Active pipeline stages allow free movement to any other stage (forward, backward, or to terminal).
+// This lets sales and directors fast-track deals or correct stage without friction.
+// WON is terminal (project created on entry). LOST requires a reason.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.OPPORTUNITY_STAGE_TRANSITIONS = void 0;
 exports.canTransitionStage = canTransitionStage;
 exports.assertValidTransition = assertValidTransition;
+
+// All active (non-terminal) pipeline stages
+const PIPELINE_STAGES = [
+    "LEAD",
+    "QUALIFIED",
+    "DATA_COLLECTION",
+    "SITE_ASSESSMENT_PENDING",
+    "CONCEPT_DESIGN",
+    "BUDGETARY_PROPOSAL",
+    "FIRM_PROPOSAL",
+    "NEGOTIATION",
+    "CONTRACTING",
+];
+
+function allExcept(...excluded) {
+    const all = [...PIPELINE_STAGES, "WON", "LOST", "ON_HOLD"];
+    return all.filter((s) => !excluded.includes(s));
+}
+
 exports.OPPORTUNITY_STAGE_TRANSITIONS = {
-    LEAD: {
-        allowedNext: ["QUALIFIED", "LOST", "ON_HOLD"],
-    },
-    QUALIFIED: {
-        allowedNext: ["DATA_COLLECTION", "LOST", "ON_HOLD"],
-    },
-    DATA_COLLECTION: {
-        allowedNext: ["SITE_ASSESSMENT_PENDING", "LOST", "ON_HOLD"],
-    },
-    SITE_ASSESSMENT_PENDING: {
-        allowedNext: ["CONCEPT_DESIGN", "LOST", "ON_HOLD"],
-    },
-    CONCEPT_DESIGN: {
-        allowedNext: ["BUDGETARY_PROPOSAL", "FIRM_PROPOSAL", "LOST", "ON_HOLD"],
-    },
-    BUDGETARY_PROPOSAL: {
-        allowedNext: ["FIRM_PROPOSAL", "NEGOTIATION", "LOST", "ON_HOLD"],
-    },
-    FIRM_PROPOSAL: {
-        allowedNext: ["NEGOTIATION", "LOST", "ON_HOLD"],
-    },
-    NEGOTIATION: {
-        allowedNext: ["CONTRACTING", "LOST", "ON_HOLD"],
-    },
-    CONTRACTING: {
-        allowedNext: ["WON", "LOST", "ON_HOLD"],
-    },
+    LEAD:                    { allowedNext: allExcept("LEAD") },
+    QUALIFIED:               { allowedNext: allExcept("QUALIFIED") },
+    DATA_COLLECTION:         { allowedNext: allExcept("DATA_COLLECTION") },
+    SITE_ASSESSMENT_PENDING: { allowedNext: allExcept("SITE_ASSESSMENT_PENDING") },
+    CONCEPT_DESIGN:          { allowedNext: allExcept("CONCEPT_DESIGN") },
+    BUDGETARY_PROPOSAL:      { allowedNext: allExcept("BUDGETARY_PROPOSAL") },
+    FIRM_PROPOSAL:           { allowedNext: allExcept("FIRM_PROPOSAL") },
+    NEGOTIATION:             { allowedNext: allExcept("NEGOTIATION") },
+    CONTRACTING:             { allowedNext: allExcept("CONTRACTING") },
     WON: {
-        allowedNext: [], // terminal — project is created
+        allowedNext: [], // terminal — project is created on entry
     },
     LOST: {
-        allowedNext: ["LEAD"], // can re-open a lost opportunity
+        allowedNext: [...PIPELINE_STAGES], // can re-open to any active stage
         requiresReason: true,
     },
     ON_HOLD: {
-        allowedNext: ["LEAD", "QUALIFIED", "DATA_COLLECTION", "LOST"],
+        allowedNext: [...PIPELINE_STAGES, "LOST"], // resume to any active stage or mark lost
     },
 };
+
 function canTransitionStage(from, to) {
     const rule = exports.OPPORTUNITY_STAGE_TRANSITIONS[from];
     return rule.allowedNext.includes(to);

@@ -1,0 +1,198 @@
+Dev Log — 2026-04-15 (d)
+Session: Global Search + PROJECT_ENGINEER Audit + Seed Fix
+============================================================
+
+SESSION SUMMARY
+---------------
+Three tasks completed this session:
+  A. Global Search (⌘K command palette) — full stack
+  B. PROJECT_ENGINEER role security audit — findings + recommendations
+  C. PROJECT_ENGINEER sign-in fix — seed not previously run
+
+============================================================
+A. GLOBAL SEARCH — GET /search?q=
+============================================================
+
+PROBLEM
+  TopBar search pill was a styled <button> with no onClick, no state,
+  no API connection. Clicking it or pressing ⌘K did nothing.
+
+BACKEND
+  New: apps/api/src/modules/search/
+    search.service.ts    — parallel search across 6 resources, scope-aware
+    search.controller.ts — GET /search?q= (Zod-validated, JWT-protected)
+    search.module.ts     — module registration
+
+  Updated: app.module.ts — SearchModule imported
+
+  Resources searched:
+    Opportunity  → title, code, summary, account.name  (own/assigned/team/all)
+    Project      → name, code, account.name             (assigned/all)
+    Proposal     → title, code, opportunity.account.name (own/assigned/team/all)
+    Account      → name, code, industry, region
+    Contact      → firstName, lastName, email, jobTitle, phone
+    Site         → name, code, address, region
+
+  Returns: { query, total, groups[] } — top 5 per group
+  Empty groups omitted. Groups ordered: opp → project → proposal → account → contact → site.
+  Promise.allSettled: one slow resource never blocks others.
+
+  Schema field names verified against Prisma before writing:
+    - Contact: firstName/lastName (not name), accounts via AccountContact[]
+    - Opportunity: ownerUserId (not ownerId)
+    - Proposal: createdByUserId; account via opportunity.account
+    - OpportunityMember.userId, ProjectMember.userId confirmed
+
+FRONTEND
+  New: apps/web/src/components/layout/search-modal.tsx
+    - Opens on pill click OR ⌘K / Ctrl+K (global useEffect shortcut)
+    - 280ms debounced input → GET /search?q=
+    - Loading spinner replaces search icon during fetch
+    - Results grouped with label + count badge
+    - Each result: color-coded type icon + title + code + subtitle
+    - Keyboard: ↑↓ navigate, ↵ open, Esc close
+    - Mouse hover syncs with keyboard activeIndex
+    - Active item: blue tint + colored left border + ↵ hint
+    - States: prompt (<2 chars) / loading / results / empty / error
+    - Footer: result count + keyboard shortcut legend
+
+  Updated: apps/web/src/components/layout/topbar.tsx
+    - Import added: SearchModal, useEffect
+    - searchOpen state added
+    - useEffect: ⌘K / Ctrl+K toggles modal globally
+    - Search button: onClick={() => setSearchOpen(true)}
+    - <SearchModal> mounted in render tree
+
+  TypeScript: 0 errors on both apps/api and apps/web after implementation
+
+============================================================
+B. PROJECT_ENGINEER ROLE SECURITY AUDIT
+============================================================
+
+Requested audit: project edit scope, proposal visibility, scope enforcement.
+Full analysis performed against: projects.service.ts, projects.dto.ts,
+proposals.service.ts, documents.service.ts, permissions.seed.ts,
+authz.service.ts, sensitive-fields.ts, projects.controller.ts.
+
+FINDINGS SUMMARY
+
+  R1 — CRITICAL  project:edit:assigned gives PE write access to projectManagerId
+                 PE can reassign PM or self-promote
+
+  R2 — CRITICAL  budgetBaseline and budgetUpdated in UpdateProjectSchema
+                 PE has zero budget read access but can WRITE these fields
+                 (no field-level guard in update() method)
+
+  R3 — HIGH      Gate status endpoint uses project_gate:edit guard
+                 UpdateGateStatusSchema allows status: 'APPROVED'
+                 Service has no approval-authority check → PE can approve gates
+                 and have their ID stamped as approver
+
+  R4 — HIGH      Deliverable update allows status: 'APPROVED'
+                 No role check before stamping approvedById → PE can self-approve
+
+  R5 — HIGH      project status field (ACTIVE/ON_HOLD/COMPLETED/CANCELLED)
+                 writable by PE → can cancel or complete a project
+
+  R6 — MEDIUM    commercialSummary returned to PE with no gate
+                 Free-text field routinely contains CAPEX/margin prose
+
+  R7 — MEDIUM    Proposal + opportunity scope for PE resolves via OpportunityMember
+                 PE is assigned via ProjectMember (not OpportunityMember)
+                 If admin adds PE only as ProjectMember → they see zero proposals
+                 and zero opportunities in list views (correct design intent,
+                 but the traversal path is not through ProjectMember → this is
+                 a gap if admin expects project membership to imply proposal access)
+
+  R8 — MEDIUM    pmoStatusNote, lastPmoReviewAt writable by PE (PMO governance)
+
+  R9 — MEDIUM    designLeadId, procurementLeadId writable by PE (staffing assignments)
+
+  R10 — MEDIUM   estimatedSavings, paybackYears returned to PE — not in stripping
+                 policy, but economically revealing — BUSINESS DECISION NEEDED
+
+CONFIRMED CORRECT
+  - estimatedCapex, estimatedMargin, marginPercent → correctly null for PE
+    (gated on margin:view_estimated permission in proposals.service.ts)
+  - Project list + detail scope: correctly checks ProjectMember.userId
+  - Document scope: correctly traverses project.members path → PE sees project docs
+  - Gate approval permission exists (project_gate:approve) but is not called
+    inside updateGateStatus() — permission exists, enforcement missing
+
+RECOMMENDED FIXES (not yet implemented — pending next session)
+  1. projects.service.ts update(): add role-based field guard before Prisma call
+     PE-safe fields: name, notes, ragStatus, currentBlocker, blockerOwnerId, blockerDueDate
+     Restricted (throw ForbiddenException if PE sends them):
+       projectManagerId, designLeadId, procurementLeadId,
+       budgetBaseline, budgetUpdated, status, pmoStatusNote, lastPmoReviewAt
+
+  2. updateGateStatus(): check project_gate:approve before allowing APPROVED/REJECTED
+  3. updateDeliverable(): check project_gate:approve before allowing APPROVED
+  4. proposals.service.ts findById(): gate commercialSummary on canViewMargin
+  5. Proposal findAll() scope: add project.members traversal path for PE
+  6. Decide on estimatedSavings / paybackYears stripping (business decision)
+
+============================================================
+C. PROJECT_ENGINEER SIGN-IN FIX
+============================================================
+
+PROBLEM
+  User could not sign in as projectengineer@pekatgroup.com.
+
+DIAGNOSIS
+  - seed.ts had PROJECT_ENGINEER role + test user in the array (added previously)
+  - Database seed had NOT been re-run since that was added
+  - User record simply did not exist in the DB
+
+FIX
+  Ran: pnpm --filter @solaroo/db db:seed
+
+  Output:
+    ✓ 14 roles seeded
+    ✓ 262 permissions seeded, 514 role-permission links created, 0 stale links removed
+    ✓ Super admin seeded: see@pekatgroup.com
+    ✓ 13 test users seeded (password: Test@1234)
+
+  No code changes required. All frontend, backend, and auth code was already correct.
+  Issue was purely a missing database record.
+
+  Credential confirmed working:
+    Email:    projectengineer@pekatgroup.com
+    Password: Test@1234
+    Nav:      Dashboard, Projects, Documents
+    Data:     Empty until added as ProjectMember on a project (by design)
+
+============================================================
+FILES CHANGED THIS SESSION
+============================================================
+  NEW
+    apps/api/src/modules/search/search.service.ts
+    apps/api/src/modules/search/search.controller.ts
+    apps/api/src/modules/search/search.module.ts
+    apps/web/src/components/layout/search-modal.tsx
+    dev_log/dev_log_260415c.txt  (search implementation log, written mid-session)
+
+  MODIFIED
+    apps/api/src/app.module.ts           (SearchModule import)
+    apps/web/src/components/layout/topbar.tsx  (SearchModal + ⌘K wiring)
+
+  DATABASE
+    Seed re-run: 14 roles, 262 permissions, 13 test users upserted
+
+============================================================
+PENDING FOR NEXT SESSION
+============================================================
+  HIGH PRIORITY
+    1. Fix project edit field restrictions for PROJECT_ENGINEER (R1, R2, R5, R8, R9)
+    2. Gate + deliverable approval authority checks (R3, R4)
+    3. Strip commercialSummary from proposal response for restricted roles (R6)
+
+  MEDIUM PRIORITY
+    4. Proposal/opportunity scope: add ProjectMember traversal path (R7)
+    5. Business decision: strip estimatedSavings + paybackYears? (R10)
+    6. Scope enforcement fixes (from earlier audit — still pending)
+    7. Sensitive field stripping fixes (from earlier audit — still pending)
+
+  LOW PRIORITY
+    8. Notifications bell — currently decorative, no data
+    9. Dashboard widgets with real data

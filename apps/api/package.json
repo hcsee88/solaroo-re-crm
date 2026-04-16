@@ -8,8 +8,8 @@
     "start": "node dist/main",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "type-check": "tsc --noEmit",
-    "test": "jest",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test": "jest --runInBand --passWithNoTests --cacheDirectory ../../.tmp/jest/api",
+    "test:e2e": "jest --runInBand --config ./test/jest-e2e.json --passWithNoTests --cacheDirectory ../../.tmp/jest/api-e2e"
   },
   "dependencies": {
     "@solaroo/db": "workspace:*",

@@ -5,6 +5,8 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
+import { AuthzService } from '../../common/authz/authz.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { UserContext, PaginatedResult } from '@solaroo/types';
 import {
   CreateProposalDto,
@@ -117,7 +119,11 @@ function computeAllowedActions(
 
 @Injectable()
 export class ProposalsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authz: AuthzService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   // ── Code generation ──────────────────────────────────────────────────────
 
@@ -161,15 +167,36 @@ export class ProposalsService {
 
   async findAll(
     query: ProposalQueryDto,
-    _user: UserContext,
+    user: UserContext,
   ): Promise<PaginatedResult<ProposalListItem>> {
     const { opportunityId, accountId, status, page, pageSize, sortBy, sortDir } = query;
 
+    const scope = await this.authz.getBestScope(user, 'proposal', 'view');
+    if (!scope) throw new ForbiddenException('No permission to view proposals');
+
+    const scopeFilter: Prisma.ProposalWhereInput =
+      scope === 'own'
+        ? { createdByUserId: user.id }
+        : scope === 'assigned'
+          ? {
+              OR: [
+                { createdByUserId: user.id },
+                { opportunity: { members: { some: { userId: user.id } } } },
+                { opportunity: { project: { members: { some: { userId: user.id } } } } },
+                { opportunity: { project: { projectManagerId: user.id } } },
+              ],
+            }
+          : {};
+
+    const andFilters: Prisma.ProposalWhereInput[] = [scopeFilter];
     const where: Prisma.ProposalWhereInput = {
+      AND: andFilters,
       ...(opportunityId && { opportunityId }),
       ...(accountId && { opportunity: { accountId } }),
       ...(status && { versions: { some: { approvalStatus: status as any } } }),
     };
+
+    const canViewMargin = await this.authz.hasPermission(user, 'margin', 'view_estimated');
 
     const [total, items] = await Promise.all([
       this.prisma.proposal.count({ where }),
@@ -217,8 +244,8 @@ export class ProposalsService {
           ? {
               versionNo:      p.versions[0].versionNo,
               approvalStatus: p.versions[0].approvalStatus,
-              estimatedCapex: p.versions[0].estimatedCapex?.toString() ?? null,
-              marginPercent:  p.versions[0].marginPercent?.toString() ?? null,
+              estimatedCapex: canViewMargin ? (p.versions[0].estimatedCapex?.toString() ?? null) : null,
+              marginPercent:  canViewMargin ? (p.versions[0].marginPercent?.toString() ?? null) : null,
             }
           : null,
         _count: p._count,
@@ -238,11 +265,13 @@ export class ProposalsService {
       select: {
         id: true, proposalCode: true, title: true,
         createdAt: true, updatedAt: true,
+        createdByUserId: true,
         opportunity: {
           select: {
             id: true, opportunityCode: true, title: true,
             account: { select: { id: true, accountCode: true, name: true } },
             site:    { select: { id: true, siteCode: true, name: true } },
+            project: { select: { id: true } },
           },
         },
         versions: {
@@ -273,6 +302,14 @@ export class ProposalsService {
 
     if (!p) throw new NotFoundException(`Proposal ${id} not found`);
 
+    await this.authz.requirePermission(user, 'proposal', 'view', {
+      ownerId:       p.createdByUserId ?? undefined,
+      opportunityId: p.opportunity.id,
+      projectId:     p.opportunity.project?.id,
+    });
+
+    const canViewMargin = await this.authz.hasPermission(user, 'margin', 'view_estimated');
+
     const versions: ProposalVersionItem[] = p.versions.map((v) => {
       const approvals: ApprovalItem[] = v.approvals.map((a) => ({
         id:            a.id,
@@ -290,13 +327,13 @@ export class ProposalsService {
         versionNo:              v.versionNo,
         title:                  v.title,
         approvalStatus:         v.approvalStatus,
-        estimatedCapex:         v.estimatedCapex?.toString() ?? null,
-        estimatedMargin:        v.estimatedMargin?.toString() ?? null,
-        marginPercent:          v.marginPercent?.toString() ?? null,
-        estimatedSavings:       v.estimatedSavings?.toString() ?? null,
-        paybackYears:           v.paybackYears?.toString() ?? null,
+        estimatedCapex:         canViewMargin ? (v.estimatedCapex?.toString() ?? null) : null,
+        estimatedMargin:        canViewMargin ? (v.estimatedMargin?.toString() ?? null) : null,
+        marginPercent:          canViewMargin ? (v.marginPercent?.toString() ?? null) : null,
+        estimatedSavings:       canViewMargin ? (v.estimatedSavings?.toString() ?? null) : null,
+        paybackYears:           canViewMargin ? (v.paybackYears?.toString() ?? null) : null,
         technicalSummary:       v.technicalSummary,
-        commercialSummary:      v.commercialSummary,
+        commercialSummary:      canViewMargin ? v.commercialSummary : null,
         submittedForApprovalAt: v.submittedForApprovalAt,
         approvedAt:             v.approvedAt,
         createdAt:              v.createdAt,
@@ -466,6 +503,7 @@ export class ProposalsService {
   ): Promise<ProposalDetail> {
     const version = await this.prisma.proposalVersion.findUnique({
       where: { proposalId_versionNo: { proposalId, versionNo } },
+      include: { proposal: { select: { proposalCode: true, title: true } } },
     });
     if (!version) throw new NotFoundException('Version not found');
     if (version.approvalStatus !== 'DRAFT') {
@@ -495,6 +533,24 @@ export class ProposalsService {
       }),
     ]);
 
+    // ── Notify approvers ─────────────────────────────────────────────────────
+    const approverIds = [salesManagerId, directorId].filter(
+      (id): id is string => !!id && id !== user.id,
+    );
+    const linkUrl = `/proposals/${proposalId}`;
+    const proposalLabel = `${version.proposal.proposalCode} v${versionNo}`;
+    this.notifications.createMany(
+      approverIds.map((userId) => ({
+        userId,
+        title: `Proposal approval required: ${proposalLabel}`,
+        body:  `"${version.proposal.title}" has been submitted for your review.`,
+        type:  'proposal_submitted',
+        linkUrl,
+        resource:   'proposal',
+        resourceId: proposalId,
+      })),
+    ).catch(() => {});
+
     return this.findById(proposalId, user);
   }
 
@@ -508,7 +564,10 @@ export class ProposalsService {
   ): Promise<ProposalDetail> {
     const version = await this.prisma.proposalVersion.findUnique({
       where:   { proposalId_versionNo: { proposalId, versionNo } },
-      include: { approvals: { orderBy: { approvalOrder: 'asc' } } },
+      include: {
+        approvals: { orderBy: { approvalOrder: 'asc' } },
+        proposal:  { select: { proposalCode: true, title: true, createdByUserId: true } },
+      },
     });
     if (!version) throw new NotFoundException('Version not found');
     if (!['SUBMITTED', 'UNDER_REVIEW'].includes(version.approvalStatus)) {
@@ -542,7 +601,6 @@ export class ProposalsService {
       newStatus = 'DRAFT';
       await this.prisma.proposalApproval.deleteMany({ where: { proposalVersionId: version.id } });
     } else {
-      // APPROVED — check if all approvals are done
       const allApprovals = await this.prisma.proposalApproval.findMany({
         where: { proposalVersionId: version.id },
       });
@@ -556,6 +614,40 @@ export class ProposalsService {
       where: { proposalId_versionNo: { proposalId, versionNo } },
       data:  updateData,
     });
+
+    // ── Notify proposal creator of the decision ──────────────────────────────
+    const creatorId = version.proposal.createdByUserId;
+    if (creatorId && creatorId !== user.id && newStatus !== 'UNDER_REVIEW') {
+      const proposalLabel = `${version.proposal.proposalCode} v${versionNo}`;
+      const linkUrl = `/proposals/${proposalId}`;
+      const decisionMessages: Record<string, { title: string; body: string; type: string }> = {
+        APPROVED: {
+          title: `Proposal approved: ${proposalLabel}`,
+          body:  `"${version.proposal.title}" has been approved.`,
+          type:  'proposal_approved',
+        },
+        REJECTED: {
+          title: `Proposal rejected: ${proposalLabel}`,
+          body:  `"${version.proposal.title}" was rejected. Check comments and prepare a new version.`,
+          type:  'proposal_rejected',
+        },
+        DRAFT: {
+          title: `Proposal returned for revision: ${proposalLabel}`,
+          body:  `"${version.proposal.title}" was returned for revision. Check reviewer comments.`,
+          type:  'proposal_returned',
+        },
+      };
+      const msg = decisionMessages[newStatus];
+      if (msg) {
+        this.notifications.create({
+          userId: creatorId,
+          ...msg,
+          linkUrl,
+          resource:   'proposal',
+          resourceId: proposalId,
+        }).catch(() => {});
+      }
+    }
 
     return this.findById(proposalId, user);
   }

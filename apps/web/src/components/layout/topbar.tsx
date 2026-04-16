@@ -1,11 +1,13 @@
 "use client";
 
-import { Bell, Search, ChevronDown, LogOut, KeyRound, X } from "lucide-react";
-import { useState } from "react";
+import { Search, ChevronDown, LogOut, KeyRound, X } from "lucide-react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { post, patch } from "@/lib/api-client";
+import { SearchModal } from "./search-modal";
+import { NotificationBell } from "./notification-bell";
 
 function getInitials(name: string): string {
   return name
@@ -25,7 +27,7 @@ const AVATAR_COLORS = [
 function getAvatarColor(name: string): string {
   let hash = 0;
   for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#0073ea";
 }
 
 // ─── Change Password Modal ────────────────────────────────────────────────────
@@ -173,6 +175,19 @@ export function TopBar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // ⌘K / Ctrl+K global shortcut to open search
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen((o) => !o);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const initials    = user ? getInitials(user.name) : "?";
   const displayName = user?.name ?? "Loading…";
@@ -197,6 +212,7 @@ export function TopBar() {
     >
       {/* Global search — Monday style pill */}
       <button
+        onClick={() => setSearchOpen(true)}
         className="flex items-center gap-2 px-3 h-8 rounded-full border text-sm transition-all duration-150"
         style={{
           background: "hsl(228 33% 97%)",
@@ -224,23 +240,7 @@ export function TopBar() {
       {/* Right actions */}
       <div className="flex items-center gap-1">
         {/* Notifications bell */}
-        <button
-          className="relative w-8 h-8 rounded-full flex items-center justify-center transition-colors"
-          style={{ color: "#676879" }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLElement).style.background = "hsl(228 33% 94%)";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLElement).style.background = "";
-          }}
-        >
-          <Bell className="w-4 h-4" />
-          {/* Notification dot */}
-          <span
-            className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full border-2 border-white"
-            style={{ background: "#e2445c" }}
-          />
-        </button>
+        <NotificationBell />
 
         {/* Divider */}
         <div className="w-px h-5 mx-1" style={{ background: "hsl(218 23% 91%)" }} />
@@ -347,6 +347,8 @@ export function TopBar() {
     {showChangePassword && (
       <ChangePasswordModal onClose={() => setShowChangePassword(false)} />
     )}
+
+    <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
     </>
   );
 }

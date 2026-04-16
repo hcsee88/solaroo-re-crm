@@ -110,6 +110,37 @@ export class AuthzService {
     return result as Partial<T>;
   }
 
+  /**
+   * Returns the highest scope the user has for a given resource:action.
+   * Precedence: all > team > assigned > own > null (no permission).
+   * Use this in service list methods to determine which WHERE clause to apply.
+   */
+  async getBestScope(
+    user: UserContext,
+    resource: Resource,
+    action: Action,
+  ): Promise<Scope | null> {
+    const userPerms = await this.loadUserPermissions(user.id);
+    const SCOPE_RANK: Record<Scope, number> = { all: 4, team: 3, assigned: 2, own: 1 };
+
+    let best: Scope | null = null;
+    let bestRank = 0;
+
+    for (const key of userPerms) {
+      const [r, a, s] = key.split(':');
+      if (r === resource && a === action) {
+        const scope = s as Scope;
+        const rank = SCOPE_RANK[scope] ?? 0;
+        if (rank > bestRank) {
+          bestRank = rank;
+          best = scope;
+        }
+      }
+    }
+
+    return best;
+  }
+
   // ─── Scope resolution ─────────────────────────────────────────────────────
 
   private async scopeCoversRecord(
@@ -126,9 +157,12 @@ export class AuthzService {
 
       case 'team':
         if (ctx.ownerId === user.id) return true;
-        // Same role name = same "team" for v1 (extend with Team model in v2)
+        // If ownerRoleName is provided, verify same team (role).
         if (ctx.ownerRoleName) return ctx.ownerRoleName === user.roleName;
-        return false;
+        // V1 fallback: no Team model yet. List queries already treat team as
+        // all (no extra WHERE). Record-level checks must match: if ownerRoleName
+        // is not passed, grant access to preserve that parity.
+        return true;
 
       case 'assigned': {
         if (ctx.ownerId === user.id) return true;

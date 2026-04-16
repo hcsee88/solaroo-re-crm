@@ -2,8 +2,10 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
+import { AuthzService } from '../../common/authz/authz.service';
 import { UserContext, PaginatedResult } from '@solaroo/types';
 import { CreateSiteDto, UpdateSiteDto, SiteQueryDto } from './sites.dto';
 import { Prisma, Prisma as PrismaTypes } from '@solaroo/db';
@@ -70,25 +72,86 @@ export type SiteDetail = {
 
 @Injectable()
 export class SitesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authz: AuthzService,
+  ) {}
+
+  private async buildScopeFilter(
+    user: UserContext,
+    action: 'view' | 'edit',
+  ): Promise<Prisma.SiteWhereInput> {
+    const scope = await this.authz.getBestScope(user, 'site', action);
+    if (!scope) {
+      throw new ForbiddenException(`No permission to ${action} sites`);
+    }
+
+    switch (scope) {
+      case 'all':
+        return {};
+      case 'team':
+        return {
+          opportunities: {
+            some: { owner: { role: { name: user.roleName } } },
+          },
+        };
+      case 'own':
+        return {
+          opportunities: {
+            some: { ownerUserId: user.id },
+          },
+        };
+      case 'assigned':
+        return {
+          OR: [
+            {
+              opportunities: {
+                some: {
+                  OR: [
+                    { ownerUserId: user.id },
+                    { members: { some: { userId: user.id } } },
+                  ],
+                },
+              },
+            },
+            {
+              projects: {
+                some: {
+                  OR: [
+                    { projectManagerId: user.id },
+                    { members: { some: { userId: user.id } } },
+                  ],
+                },
+              },
+            },
+          ],
+        };
+    }
+  }
 
   // ─── List ──────────────────────────────────────────────────────────────────
 
   async findAll(
     query: SiteQueryDto,
-    _user: UserContext,
+    user: UserContext,
   ): Promise<PaginatedResult<SiteListItem>> {
     const { search, accountId, gridCategory, isActive, page, pageSize, sortBy, sortDir } = query;
+    const scopeFilter = await this.buildScopeFilter(user, 'view');
+    const andFilters: Prisma.SiteWhereInput[] = [scopeFilter];
 
-    const where: Prisma.SiteWhereInput = {
-      ...(search && {
+    if (search) {
+      andFilters.push({
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
           { siteCode: { contains: search, mode: 'insensitive' } },
           { region: { contains: search, mode: 'insensitive' } },
           { address: { contains: search, mode: 'insensitive' } },
         ],
-      }),
+      });
+    }
+
+    const where: Prisma.SiteWhereInput = {
+      AND: andFilters,
       ...(accountId && { accountId }),
       ...(gridCategory && { gridCategory }),
       ...(isActive !== undefined && { isActive }),
@@ -131,9 +194,10 @@ export class SitesService {
 
   // ─── Detail ────────────────────────────────────────────────────────────────
 
-  async findById(id: string, _user: UserContext): Promise<SiteDetail> {
-    const site = await this.prisma.site.findUnique({
-      where: { id },
+  async findById(id: string, user: UserContext): Promise<SiteDetail> {
+    const scopeFilter = await this.buildScopeFilter(user, 'view');
+    const site = await this.prisma.site.findFirst({
+      where: { id, ...scopeFilter },
       select: {
         id: true,
         siteCode: true,
@@ -216,7 +280,12 @@ export class SitesService {
   // ─── Update ────────────────────────────────────────────────────────────────
 
   async update(id: string, dto: UpdateSiteDto, _user: UserContext): Promise<SiteDetail> {
-    await this.findById(id, _user);
+    const scopeFilter = await this.buildScopeFilter(_user, 'edit');
+    const existing = await this.prisma.site.findFirst({
+      where: { id, ...scopeFilter },
+      select: { id: true },
+    });
+    if (!existing) throw new NotFoundException(`Site ${id} not found`);
 
     const site = await this.prisma.site.update({
       where: { id },

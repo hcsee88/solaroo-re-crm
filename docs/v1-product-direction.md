@@ -2,7 +2,7 @@
 
 **Status:** Active  
 **Owner:** Pekat Teknologi Sdn Bhd  
-**Last updated:** 2026-04-11
+**Last updated:** 2026-04-15
 
 ---
 
@@ -52,8 +52,7 @@ The three questions V1 answers at a glance:
 
 | Module | What Is Built | What Is Enough for V1 |
 |--------|--------------|----------------------|
-| **Contracts** | Backend done | Basic frontend: list, view, create |
-| **Documents** | Upload + download works | Per-opportunity upload is enough for V1 |
+| **Documents** | Full V1 Document Control delivered: paginated list, search/filter, upload linked to project or opportunity, download, revision history dialog, scope-enforced access, project-aware docCode | ✅ V1 complete |
 | **O&M / Tickets** | Backend done | Basic ticket creation and status tracking |
 | **Notifications** | Backend stub | In-app notification records for: proposal submitted for approval, proposal approved/rejected, gate submitted for approval |
 
@@ -61,6 +60,7 @@ The three questions V1 answers at a glance:
 
 | Item | Why Deferred |
 |------|-------------|
+| **Contracts frontend** | Backend schema and service exist; no frontend pages in V1. Contract management is done outside the system until V2. |
 | AI Copilot UI | Not needed for adoption; backend already connected |
 | Technical Assessment module | Complex domain; defer until proposals flow is mature |
 | Full procurement frontend | Low immediate demand |

@@ -1,0 +1,322 @@
+================================================================================
+DEV LOG — 2026-04-15 (session B)
+Solaroo RE CRM | Pekat Teknologi Sdn Bhd
+Session: V1 Document Control — Backend upgrade + Full frontend
+================================================================================
+
+─── CHANGES MADE ───────────────────────────────────────────────────────────────
+
+1. apps/api/src/modules/documents/documents.dto.ts
+   CHANGED — UploadDocumentSchema: opportunityId now optional; added projectId optional.
+              Added .refine() to enforce at least one context field.
+   CHANGED — DocumentQuerySchema: added search, status, sortBy, sortDir fields.
+              pageSize default lowered from 100 → 20 for practical pagination.
+
+2. apps/api/src/modules/documents/documents.service.ts
+   REWRITTEN — Full implementation replacing stubs.
+   NEW TYPE: DocumentListItem — extends DocumentItem with project + opportunity context.
+   NEW TYPE: DocumentRevisionDetail — for revision history view.
+   NEW: DOC_SELECT shared Prisma select shape used by all list/detail methods.
+   NEW: mapToListItem() helper keeps Prisma→response mapping in one place.
+   IMPLEMENTED: findAll(user, query) — real paginated query with:
+     - scope enforcement (getBestScope → assigned/all filter)
+     - search, status, docType, projectId, opportunityId filters
+     - sortBy, sortDir, page, pageSize
+   IMPLEMENTED: findRevisions(id, user) — returns all revisions with uploader names
+   UPDATED: upload() — now supports projectId context in addition to opportunityId
+     - Project docs stored: uploads/projects/{projectId}/{categorySlug}/
+     - Project docCode format: {projectCode}-DOC-{NNN}
+     - Fetches project to get projectCode for docCode generation
+   UPDATED: getFileInfo() — download filename now includes revision suffix
+   KEPT: findForOpportunity() — preserved for backward compat
+   ADDED: AuthzService injection (AuthzModule is @Global, no module import needed)
+
+3. apps/api/src/modules/documents/documents.controller.ts
+   UPDATED: findAll — now always delegates to service.findAll(user, query) with
+            full query object; removed if/else opportunityId branching
+   ADDED: GET /documents/:id/revisions endpoint → findRevisions()
+
+4. apps/web/src/app/(app)/documents/page.tsx
+   REWRITTEN — Full V1 Document Control page (was a 15-line placeholder).
+   Features:
+     - Paginated document list (20 per page)
+     - Search by title or docCode (debounced 400ms)
+     - Filter by document type and status
+     - URL-persisted filter state (search, docType, status, page)
+     - Table: Code | Title | Type | Status | Rev | Linked To | Uploaded | Size | Actions
+     - Skeleton loading (9-column, 8 rows)
+     - Empty state with context-aware message
+     - Download button → opens API download URL in new tab (uses httpOnly cookie)
+     - Revision history dialog (loads GET /documents/:id/revisions)
+     - Delete document with confirmation dialog
+     - Upload dialog:
+         - Context selector: Project or Opportunity
+         - Loads project list (GET /projects?pageSize=100) and opportunity list on open
+         - File picker with click-to-browse + accepted extensions
+         - docType dropdown
+         - Notes textarea (optional)
+         - 15MB client-side size check before upload
+         - Uses existing uploadFile() helper (base64 JSON)
+         - Inline error display
+
+5. apps/web/src/lib/role-ui.ts
+   CHANGED — DIRECTOR nav restored to all 12 items (was missing accounts, contacts,
+              sites, procurement, om — regression from earlier session).
+
+6. docs/v1-product-direction.md
+   CHANGED — Documents row updated to reflect full V1 delivery status.
+
+─── ARCHITECTURE NOTES ─────────────────────────────────────────────────────────
+
+Document scope enforcement:
+  assigned scope → documents where:
+    - ownerUserId = user.id  OR
+    - projectId links to a project where user is PM or ProjectMember  OR
+    - opportunityId links to an opportunity where user is owner or OpportunityMember
+
+  all/team scope → no filter (DIRECTOR, PMO, SALES_MANAGER, DESIGN_LEAD, FINANCE_ADMIN)
+
+Download mechanism:
+  Direct window.open() to /api/documents/:id/download
+  Browser sends httpOnly cookie automatically → auth passes → file streams
+  Content-Disposition: attachment; filename="DocTitle_RevA.pdf"
+
+Upload file storage paths:
+  Opportunity-linked: uploads/opportunities/{opportunityId}/{categorySlug}/{timestamp}-{name}
+  Project-linked:     uploads/projects/{projectId}/{categorySlug}/{timestamp}-{name}
+
+─── NOT BUILT (V1 SCOPE BOUNDARY) ──────────────────────────────────────────────
+
+  Document approval workflow (status transitions DRAFT→UNDER_REVIEW→APPROVED)
+  Re-upload / add new revision UI
+  Transmittal management UI
+  Bulk document actions
+  Document-to-gate-deliverable linking UI
+  Full-text document content search
+
+================================================================================
+
+================================================================================
+DEV LOG — 2026-04-15 (session B, continued)
+Solaroo RE CRM | Pekat Teknologi Sdn Bhd
+Session continuation: PROJECT_ENGINEER Role Integration
+================================================================================
+
+TASK
+────
+Introduce the PROJECT_ENGINEER role across seed, permissions, UI nav, and docs.
+This role did not previously exist in the system.
+
+BUSINESS RATIONALE
+──────────────────
+A Project Manager oversees multiple projects and holds approval authority.
+A Project Engineer is the on-the-ground execution coordinator — they track
+deliverables, upload documents, log issues/risks, and prepare gate packages
+for PM review. They have no commercial or approval authority.
+
+FILES CHANGED
+─────────────
+packages/db/src/seed.ts
+  - Added PROJECT_ENGINEER to roles array (with description)
+  - Added test user: projectengineer@pekatgroup.com / Test@1234
+
+packages/db/src/seeds/permissions.seed.ts
+  - Added PROJECT_ENGINEER to 22 permission lines across 13 resources:
+    contact:view:assigned
+    site:view:assigned
+    opportunity:view:assigned
+    proposal:view:assigned, proposal_version:view:assigned
+    project:view:assigned, project:edit:assigned
+    project_gate:view:assigned, edit:assigned, submit:assigned (NOT approve)
+    milestone:view:assigned, create:assigned, edit:assigned
+    issue:view:assigned, create:assigned, edit:assigned
+    risk:view:assigned, create:assigned
+    document:view/create/edit/submit/export:assigned (NOT approve)
+    drawing:view:assigned
+    vendor:view:all (reference)
+    purchase_order:view:assigned
+    delivery:view:assigned
+    site_log:view:assigned
+    checklist:view:assigned
+    punch_list:view:assigned, edit:assigned (NOT approve)
+    reporting:view:assigned
+
+apps/web/src/lib/role-ui.ts
+  - Added PROJECT_ENGINEER to RoleName union type
+  - Added NAV_BY_ROLE entry: /dashboard, /projects, /documents
+  - Added _ROLES_SEE_PROJECT_SECTION set (documentation; project health shown to all execution roles)
+
+docs/project-engineer-role.md (NEW)
+  - Full role reference: definition, responsibilities, access matrix,
+    restrictions, comparison vs PM / Design Engineer / Site Supervisor,
+    recommended workspace, implementation notes, test user, open questions
+
+PERMISSIONS NOT GRANTED (deliberate)
+──────────────────────────────────────
+- cost:view            → no budget baseline / actual cost visibility
+- margin:view_estimated → no CAPEX or margin % visibility
+- contract:view        → no contract access
+- payment_status:view  → no invoice / payment access
+- project_gate:approve → submit only; PM approves
+- punch_list:approve   → view + edit only; PM/CE approves
+- user_admin           → SUPER_ADMIN exclusive
+
+SCOPE RULE
+──────────
+All PROJECT_ENGINEER permissions are scoped to 'assigned'. The role sees
+nothing until explicitly added as a ProjectMember on a specific project.
+
+================================================================================
+
+================================================================================
+DEV LOG — 2026-04-15 (session B, continued)
+Solaroo RE CRM | Pekat Teknologi Sdn Bhd
+Session continuation: Linked Document Visibility — Opportunity + Project detail pages
+================================================================================
+
+TASK
+────
+Surface linked documents directly on the Opportunity and Project detail pages
+so users don't need to navigate to the Document Center to access or upload docs.
+
+APPROACH
+────────
+Created a single shared component `LinkedDocsSection` that handles all document
+list/upload/download/delete/revision-history logic and is embedded in both pages.
+No code duplication. All document state lives inside the component.
+
+FILES CREATED
+─────────────
+apps/web/src/components/documents/linked-docs-section.tsx  (NEW — ~350 lines)
+  - Props: contextType ("opportunity" | "project"), contextId, canUpload, canDelete
+  - Fetches GET /documents?{opportunityId|projectId}={id}&pageSize=100
+  - Handles both paginated { items: [] } and legacy flat array response shapes
+  - Flat table: docCode | title | type (badge) | status (badge) | rev | uploaded | actions
+  - Actions: Download (href to API download), History (RevisionDialog), Delete (confirm)
+  - RevisionDialog: fetches GET /documents/:id/revisions, shows full revision table
+  - UploadForm: inline form with title, doc type select, file drop zone, notes
+    - Uses uploadFile() base64 helper — consistent with Document Center
+    - 15 MB guard; accepts PDF, Word, Excel, DWG, Image, ZIP
+  - Footer link: "Open Document Center →" for full view/search/filter
+  - Empty state with icon and upload CTA
+
+FILES CHANGED
+─────────────
+apps/web/src/app/(app)/opportunities/[id]/page.tsx
+  - Removed: OppDocument type, docs state, docsLoading, uploading, docError,
+    uploadTitle, fileInputRefs, loadDocs(), handleUpload(), handleDeleteDoc()
+  - Removed: del, uploadFile, API_BASE_URL_EXPORT, useRef imports (no longer needed)
+  - Replaced: entire category-grouped Documents tab (~100 lines) with:
+    <LinkedDocsSection contextType="opportunity" contextId={id} canUpload canDelete />
+  - Tab label simplified: "Documents" (count removed — component manages its own count)
+
+apps/web/src/app/(app)/projects/[id]/page.tsx
+  - Added: LinkedDocsSection import
+  - Added: activeTab state ("gates" | "documents", default "gates")
+  - Added: Tab bar (Gate Progress | Documents) above the left column content
+  - Wrapped existing gate content in {activeTab === "gates" && ...}
+  - Added: {activeTab === "documents" && <LinkedDocsSection contextType="project" ...>}
+  - Right sidebar (RAG panel, dates, budget, site, activity) unchanged
+
+WHAT IS WORKING
+───────────────
+- TypeScript: zero compile errors (verified with npx tsc --noEmit)
+- Opportunity detail: Documents tab now shows proper table with docCode, status badge,
+  type badge, revision, upload date — with download, history, delete
+- Project detail: new "Documents" tab alongside existing "Gate Progress" tab
+- Upload: same uploadFile() path as Document Center — base64 JSON to POST /documents/upload
+- Download: same <a href> pattern as Document Center — browser sends httpOnly cookie
+- Revision history: reuses same GET /documents/:id/revisions endpoint
+- Scope enforcement: backend enforces document:view:assigned — component just fetches;
+  the API returns only docs the user is allowed to see
+- "Open Document Center →" footer link in document table for full-feature access
+
+WHAT IS NOT BUILT YET
+──────────────────────
+- Document count in tab label (would require separate count fetch — not worth it for V1)
+- Transmittal UI (deferred per product direction)
+- Document approval workflow from detail pages (approve button — Design Lead only)
+- Delete permission check at UI level (currently always shown if canDelete=true;
+  backend enforces document:delete permission — safe, just slightly noisy UI-side)
+
+================================================================================
+
+================================================================================
+DEV LOG — 2026-04-15 (session B, continued)
+Solaroo RE CRM | Pekat Teknologi Sdn Bhd
+Task: Proposal Detail Page — hardening + UX improvements
+================================================================================
+
+TASK
+────
+Harden the proposal detail page for V1 adoption. Four specific gaps addressed:
+1. No inline edit for DRAFT versions (users had to use the API directly)
+2. No status attention banner (approvers didn't know a proposal was waiting)
+3. New version modal had blank fields (user had to re-enter all data)
+4. Approval chain didn't show which approver is next in line
+
+CHANGES MADE
+────────────
+apps/web/src/app/(app)/proposals/[id]/page.tsx  — FULL REWRITE
+
+New components added:
+
+StatusBanner
+  - Shown directly below the header for the active version
+  - DRAFT: neutral grey — "Draft vN — ready to submit when complete"
+  - SUBMITTED / UNDER_REVIEW: amber — "Awaiting approval · Next: [Name] (Role)"
+    Derives next approver by walking sorted approval chain, finding first
+    with no decision where all prior orders have decision=APPROVED
+  - APPROVED: green with approval date
+  - REJECTED: red with rejector name and comments
+
+EditVersionPanel
+  - Shown in-place inside VersionCard when "Edit Draft" is clicked
+  - Pre-fills all version fields from current values
+  - On save: PATCH /proposals/{id}/versions/{vno} then refresh
+  - On cancel: returns to view mode
+  - Null-safe: clears fields (sends null) if left empty in edit form
+  - VersionCard shows "Edit Draft" button when allowedActions includes "edit"
+
+NewVersionModal — UPGRADED
+  - Now accepts previousVersion prop (latest version from proposal)
+  - Pre-fills: title, capex, margin, savings, payback, techSummary, commSummary
+  - User edits only what changed — no re-entry of unchanged data
+  - Shows "Pre-filled from vN" note in dialog header
+
+ApprovalChain — UPGRADED
+  - Sorts approvals by approvalOrder before rendering
+  - Identifies "next" approver: lowest order with no decision, all prior APPROVED
+  - Next approver card has amber border + ring + "Waiting" label
+  - Decision badge labels changed: "Approved" / "Rejected" / "Returned" (title case)
+  - Comments truncated to 2 lines (line-clamp-2) with full text on hover
+
+DecisionModal — UPGRADED
+  - Decision options now shown as selectable bordered cards (not bare radio)
+  - Button label changes per decision: "Confirm Approval" / "Confirm Rejection" /
+    "Return for Revision"
+  - Placeholder text customised per decision type
+
+Other fixes:
+  - `params` prop changed to `useParams<{ id: string }>()` for consistency
+  - Version card figures shown in muted background tiles (not bare text)
+  - Active proposal detection: finds SUBMITTED/UNDER_REVIEW version, not just latest
+  - TypeScript fix: noUncheckedIndexedAccess guard on sortedApprovals[i]
+
+ALSO UPDATED
+────────────
+dev_log/Test User Credential.txt
+  - Added PROJECT_ENGINEER row (email, password, key access description)
+  - Added Sidebar Nav By Role section (full nav list per role)
+  - Updated date header to 2026-04-15
+
+dev_log/Refined role authority.txt
+  - Added PROJECT_ENGINEER row to role authority table
+  - Added: Sensitive Field Access Matrix
+  - Added: Approval Authority Matrix
+  - Added: Scope Definitions table
+  - Added: Roles that cannot see proposal financials list
+
+TypeScript: 0 errors after fix.
+
+================================================================================

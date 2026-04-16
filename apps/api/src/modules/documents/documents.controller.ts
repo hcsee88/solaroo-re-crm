@@ -17,7 +17,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RequirePermission } from '../../common/authz/require-permission.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserContext } from '@solaroo/types';
-import { DocumentsService, DocumentItem } from './documents.service';
+import { DocumentsService, DocumentListItem, DocumentRevisionDetail } from './documents.service';
 import {
   UploadDocumentSchema,
   DocumentQuerySchema,
@@ -31,18 +31,15 @@ import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 export class DocumentsController {
   constructor(private readonly documentsService: DocumentsService) {}
 
-  // ── List documents ────────────────────────────────────────────────────────
+  // ── List documents (paginated, filtered) ─────────────────────────────────
 
   @Get()
   @RequirePermission('document', 'view')
-  async findAll(
+  findAll(
     @Query(new ZodValidationPipe(DocumentQuerySchema)) query: DocumentQueryDto,
     @CurrentUser() user: UserContext,
-  ): Promise<DocumentItem[]> {
-    if (query.opportunityId) {
-      return this.documentsService.findForOpportunity(query.opportunityId);
-    }
-    return this.documentsService.findAll(user);
+  ) {
+    return this.documentsService.findAll(user, query);
   }
 
   // ── Get single document ───────────────────────────────────────────────────
@@ -52,8 +49,19 @@ export class DocumentsController {
   findById(
     @Param('id') id: string,
     @CurrentUser() user: UserContext,
-  ): Promise<DocumentItem | null> {
+  ): Promise<DocumentListItem | null> {
     return this.documentsService.findById(id, user);
+  }
+
+  // ── Get revision history ──────────────────────────────────────────────────
+
+  @Get(':id/revisions')
+  @RequirePermission('document', 'view')
+  findRevisions(
+    @Param('id') id: string,
+    @CurrentUser() user: UserContext,
+  ): Promise<DocumentRevisionDetail[]> {
+    return this.documentsService.findRevisions(id, user);
   }
 
   // ── Upload a document (base64 JSON body) ──────────────────────────────────
@@ -64,11 +72,11 @@ export class DocumentsController {
   upload(
     @Body(new ZodValidationPipe(UploadDocumentSchema)) dto: UploadDocumentDto,
     @CurrentUser() user: UserContext,
-  ): Promise<DocumentItem> {
+  ): Promise<DocumentListItem> {
     return this.documentsService.upload(dto, user);
   }
 
-  // ── Download a document ───────────────────────────────────────────────────
+  // ── Download latest revision of a document ────────────────────────────────
 
   @Get(':id/download')
   @RequirePermission('document', 'view')

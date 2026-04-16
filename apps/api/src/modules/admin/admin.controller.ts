@@ -28,6 +28,14 @@ import type { PaginatedResult } from '@solaroo/types';
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
 
+  // GET /api/admin/users/dropdown
+  // No permission gate — any authenticated user can fetch users for select widgets.
+  // Returns id, name, email, roleName only. Active users only.
+  @Get('users/dropdown')
+  listUsersDropdown(): Promise<{ id: string; name: string; email: string; roleName: string }[]> {
+    return this.adminService.listUsersForDropdown();
+  }
+
   // GET /api/admin/users
   @Get('users')
   @RequirePermission('user_admin', 'view')

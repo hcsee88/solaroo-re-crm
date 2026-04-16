@@ -3,8 +3,11 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
+import { AuthzService } from '../../common/authz/authz.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { UserContext, PaginatedResult } from '@solaroo/types';
 import { Prisma } from '@solaroo/db';
 import { GATE_TEMPLATES, formatProjectNumber } from '@solaroo/workflows';
@@ -39,23 +42,47 @@ export type ProjectListItem = {
 
 @Injectable()
 export class ProjectsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authz: AuthzService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   // ─── List ──────────────────────────────────────────────────────────────────
 
   async findAll(
     query: ProjectQueryDto,
-    _user: UserContext,
+    user: UserContext,
   ): Promise<PaginatedResult<ProjectListItem>> {
     const { search, status, accountId, page, pageSize, sortBy, sortDir } = query;
 
-    const where: Prisma.ProjectWhereInput = {
-      ...(search && {
+    const scope = await this.authz.getBestScope(user, 'project', 'view');
+    if (!scope) throw new ForbiddenException('No permission to view projects');
+
+    const scopeFilter: Prisma.ProjectWhereInput =
+      scope === 'assigned'
+        ? {
+            OR: [
+              { projectManagerId: user.id },
+              { members: { some: { userId: user.id } } },
+            ],
+          }
+        : {};
+
+    const canViewCost = await this.authz.hasPermission(user, 'cost', 'view');
+
+    const andFilters: Prisma.ProjectWhereInput[] = [scopeFilter];
+    if (search) {
+      andFilters.push({
         OR: [
           { name: { contains: search, mode: 'insensitive' } },
           { projectCode: { contains: search, mode: 'insensitive' } },
         ],
-      }),
+      });
+    }
+
+    const where: Prisma.ProjectWhereInput = {
+      AND: andFilters,
       ...(status && { status }),
       ...(accountId && { accountId }),
     };
@@ -88,8 +115,13 @@ export class ProjectsService {
       }),
     ]);
 
+    const mappedItems = (items as unknown as ProjectListItem[]).map((item) => ({
+      ...item,
+      budgetBaseline: canViewCost ? item.budgetBaseline : undefined,
+    }));
+
     return {
-      items: items as unknown as ProjectListItem[],
+      items: mappedItems,
       total,
       page,
       pageSize,
@@ -99,7 +131,7 @@ export class ProjectsService {
 
   // ─── Detail ────────────────────────────────────────────────────────────────
 
-  async findById(id: string, _user: UserContext) {
+  async findById(id: string, user: UserContext) {
     const project = await this.prisma.project.findUnique({
       where: { id },
       include: {
@@ -128,13 +160,26 @@ export class ProjectsService {
     });
 
     if (!project) throw new NotFoundException(`Project ${id} not found`);
+
+    await this.authz.requirePermission(user, 'project', 'view', {
+      ownerId:   project.projectManagerId,
+      projectId: id,
+    });
+
+    const canViewCost = await this.authz.hasPermission(user, 'cost', 'view');
+    if (!canViewCost) {
+      const p = project as Record<string, unknown>;
+      delete p['budgetBaseline'];
+      delete p['actualCostToDate'];
+      delete p['marginBaseline'];
+    }
+
     return project;
   }
 
   // ─── Create ────────────────────────────────────────────────────────────────
 
   async create(dto: CreateProjectDto, user: UserContext) {
-    // Validate opportunity exists and isn't already linked to a project
     const opportunity = await this.prisma.opportunity.findUnique({
       where: { id: dto.opportunityId },
       include: { project: true },
@@ -144,7 +189,6 @@ export class ProjectsService {
       throw new ConflictException('This opportunity already has a project');
     }
 
-    // Validate project code uniqueness
     const codeExists = await this.prisma.project.findUnique({
       where: { projectCode: dto.projectCode },
     });
@@ -152,7 +196,6 @@ export class ProjectsService {
       throw new ConflictException(`Project code ${dto.projectCode} is already in use`);
     }
 
-    // Create project + scaffold all 6 gates + deliverables in one transaction
     const project = await this.prisma.$transaction(async (tx) => {
       const created = await tx.project.create({
         data: {
@@ -172,15 +215,14 @@ export class ProjectsService {
         },
       });
 
-      // Scaffold 6 gates with deliverables from templates
       for (const gateTemplate of GATE_TEMPLATES) {
         const gate = await tx.projectGate.create({
           data: {
-            projectId:  created.id,
-            gateNo:     gateTemplate.gateNo,
-            gateName:   gateTemplate.gateName,
+            projectId:   created.id,
+            gateNo:      gateTemplate.gateNo,
+            gateName:    gateTemplate.gateName,
             ownerUserId: dto.projectManagerId,
-            status:     gateTemplate.gateNo === 1 ? 'IN_PROGRESS' : 'NOT_STARTED',
+            status:      gateTemplate.gateNo === 1 ? 'IN_PROGRESS' : 'NOT_STARTED',
           },
         });
 
@@ -205,7 +247,30 @@ export class ProjectsService {
   // ─── Update ────────────────────────────────────────────────────────────────
 
   async update(id: string, dto: UpdateProjectDto, user: UserContext) {
-    await this.findById(id, user); // ensure exists
+    await this.findById(id, user);
+
+    const privilegedRoles = new Set(['DIRECTOR', 'PMO_MANAGER', 'PROJECT_MANAGER']);
+    const isPrivileged = privilegedRoles.has(user.roleName);
+
+    if (!isPrivileged) {
+      const restrictedFields: (keyof UpdateProjectDto)[] = [
+        'projectManagerId',
+        'designLeadId',
+        'procurementLeadId',
+        'budgetBaseline',
+        'budgetUpdated',
+        'status',
+        'pmoStatusNote',
+        'lastPmoReviewAt',
+      ];
+
+      const attempted = restrictedFields.filter((f) => f in dto && dto[f] !== undefined);
+      if (attempted.length > 0) {
+        throw new ForbiddenException(
+          `Your role (${user.roleName}) is not permitted to modify: ${attempted.join(', ')}`,
+        );
+      }
+    }
 
     await this.prisma.project.update({
       where: { id },
@@ -233,7 +298,15 @@ export class ProjectsService {
     });
     if (!gate) throw new NotFoundException(`Gate ${gateNo} not found on project`);
 
-    // When approving, check all required deliverables are at least UPLOADED
+    const gateScopeCtx = { ownerId: gate.ownerUserId, projectId };
+    if (dto.status === 'APPROVED') {
+      await this.authz.requirePermission(user, 'project_gate', 'approve', gateScopeCtx);
+    } else if (dto.status === 'SUBMITTED') {
+      await this.authz.requirePermission(user, 'project_gate', 'submit', gateScopeCtx);
+    } else {
+      await this.authz.requirePermission(user, 'project_gate', 'edit', gateScopeCtx);
+    }
+
     if (dto.status === 'APPROVED') {
       const blockers = gate.deliverables.filter(
         (d) => d.isRequired && !['UPLOADED', 'SUBMITTED', 'APPROVED', 'NOT_REQUIRED'].includes(d.status),
@@ -258,7 +331,6 @@ export class ProjectsService {
         rejectedBy: user.id,
         rejectedAt: new Date(),
       }),
-      // PMO review fields — updated independently of gate status
       ...(dto.pmoFlagged !== undefined && { pmoFlagged: dto.pmoFlagged }),
       ...(dto.pmoComment !== undefined && { pmoComment: dto.pmoComment }),
       ...(dto.pmoReviewAt !== undefined && { pmoReviewAt: dto.pmoReviewAt }),
@@ -269,7 +341,6 @@ export class ProjectsService {
       data: updateData,
     });
 
-    // When a gate is approved, advance project to next gate and open it
     if (dto.status === 'APPROVED' && gateNo < 6) {
       const nextGateNo = gateNo + 1;
       await Promise.all([
@@ -284,7 +355,92 @@ export class ProjectsService {
       ]);
     }
 
+    // ── Notifications ────────────────────────────────────────────────────────
+    // Fire-and-forget: don't let notification failures break the gate update
+    this.sendGateNotifications(projectId, gateNo, gate.gateName, dto.status, user).catch(() => {});
+
     return this.findById(projectId, user);
+  }
+
+  // ─── Gate notification dispatcher ─────────────────────────────────────────
+
+  private async sendGateNotifications(
+    projectId: string,
+    gateNo: number,
+    gateName: string,
+    newStatus: string,
+    actor: UserContext,
+  ): Promise<void> {
+    // Fetch project info for notification context
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        projectCode: true,
+        name: true,
+        projectManagerId: true,
+        members: { select: { userId: true } },
+      },
+    });
+    if (!project) return;
+
+    const linkUrl = `/projects/${projectId}`;
+    const gateLabel = `G${gateNo}: ${gateName}`;
+
+    if (newStatus === 'SUBMITTED') {
+      // Notify all DIRECTOR + PMO_MANAGER users (the gate approvers)
+      const approverIds = await this.notifications.getUserIdsByRoles(['DIRECTOR', 'PMO_MANAGER']);
+      // Also notify the project PM if they differ from the actor (PM submitting notifies others)
+      if (project.projectManagerId !== actor.id) {
+        approverIds.push(project.projectManagerId);
+      }
+      const uniqueIds = [...new Set(approverIds.filter((id) => id !== actor.id))];
+      await this.notifications.createMany(
+        uniqueIds.map((userId) => ({
+          userId,
+          title: `Gate review required: ${gateLabel} — ${project.projectCode}`,
+          body: `${project.name} · Gate ${gateNo} has been submitted for approval.`,
+          type: 'gate_submitted',
+          linkUrl,
+          resource: 'project_gate',
+          resourceId: projectId,
+        })),
+      );
+    } else if (newStatus === 'APPROVED') {
+      // Notify PM + project team members
+      const memberIds = project.members.map((m) => m.userId);
+      const recipientIds = [
+        ...new Set([project.projectManagerId, ...memberIds].filter((id) => id !== actor.id)),
+      ];
+      const nextMsg = gateNo < 6 ? ` Gate ${gateNo + 1} is now open.` : ' Project execution is complete.';
+      await this.notifications.createMany(
+        recipientIds.map((userId) => ({
+          userId,
+          title: `Gate approved: ${gateLabel} — ${project.projectCode}`,
+          body: `${project.name} · ${gateLabel} has been approved.${nextMsg}`,
+          type: 'gate_approved',
+          linkUrl,
+          resource: 'project_gate',
+          resourceId: projectId,
+        })),
+      );
+    } else if (newStatus === 'REJECTED') {
+      // Notify PM + project team members to action the rejection
+      const memberIds = project.members.map((m) => m.userId);
+      const recipientIds = [
+        ...new Set([project.projectManagerId, ...memberIds].filter((id) => id !== actor.id)),
+      ];
+      await this.notifications.createMany(
+        recipientIds.map((userId) => ({
+          userId,
+          title: `Gate rejected: ${gateLabel} — ${project.projectCode}`,
+          body: `${project.name} · ${gateLabel} was rejected. Please review feedback and re-submit.`,
+          type: 'gate_rejected',
+          linkUrl,
+          resource: 'project_gate',
+          resourceId: projectId,
+        })),
+      );
+    }
   }
 
   // ─── Deliverable update ────────────────────────────────────────────────────
@@ -302,6 +458,15 @@ export class ProjectsService {
 
     if (!deliverable || deliverable.gate.projectId !== projectId) {
       throw new NotFoundException('Deliverable not found');
+    }
+
+    const gateScopeCtx = { ownerId: deliverable.gate.ownerUserId, projectId };
+    if (dto.status === 'APPROVED') {
+      await this.authz.requirePermission(user, 'project_gate', 'approve', gateScopeCtx);
+    } else if (dto.status === 'SUBMITTED') {
+      await this.authz.requirePermission(user, 'project_gate', 'submit', gateScopeCtx);
+    } else {
+      await this.authz.requirePermission(user, 'project_gate', 'edit', gateScopeCtx);
     }
 
     await this.prisma.gateDeliverable.update({
@@ -331,8 +496,6 @@ export class ProjectsService {
     if (!project) throw new NotFoundException(`Project P${String(projectNumber).padStart(3, '0')} not found`);
     return this.findById(project.id, user);
   }
-
-  // ─── Format project number ─────────────────────────────────────────────────
 
   formatNumber(n: number): string {
     return formatProjectNumber(n);

@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { get, patch } from "@/lib/api-client";
-import { CheckCircle2, Circle, Clock, XCircle, ChevronRight, AlertCircle } from "lucide-react";
+import { CheckCircle2, Circle, Clock, XCircle, ChevronRight, AlertCircle, Flag, X } from "lucide-react";
+import { LinkedDocsSection } from "@/components/documents/linked-docs-section";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,8 @@ type Gate = {
   targetDate: string | null;
   actualDate: string | null;
   remarks: string | null;
+  pmoFlagged: boolean;
+  pmoComment: string | null;
   owner: { id: string; name: string };
   deliverables: Deliverable[];
 };
@@ -335,6 +338,153 @@ function DeliverableRow({
   );
 }
 
+// ─── Gate Action Modal ────────────────────────────────────────────────────────
+
+type PendingAction = {
+  gateNo: number;
+  gateName: string;
+  newStatus: string;
+};
+
+const ACTION_CONFIG: Record<string, {
+  title: string;
+  description: string;
+  remarksLabel: string;
+  remarksRequired: boolean;
+  confirmLabel: string;
+  confirmClass: string;
+}> = {
+  SUBMITTED: {
+    title: "Submit Gate for Approval",
+    description: "This will notify the Director and PMO for review. Ensure all required deliverables are uploaded before submitting.",
+    remarksLabel: "Submission notes (optional)",
+    remarksRequired: false,
+    confirmLabel: "Submit for Approval",
+    confirmClass: "bg-amber-600 hover:bg-amber-700 text-white",
+  },
+  APPROVED: {
+    title: "Approve Gate",
+    description: "Approving this gate closes it and advances the project. This action is recorded in the audit log.",
+    remarksLabel: "Approval remarks (optional)",
+    remarksRequired: false,
+    confirmLabel: "Approve Gate",
+    confirmClass: "bg-green-600 hover:bg-green-700 text-white",
+  },
+  REJECTED: {
+    title: "Reject Gate",
+    description: "The gate will be returned to the PM for rework. A rejection reason is required.",
+    remarksLabel: "Rejection reason",
+    remarksRequired: true,
+    confirmLabel: "Reject Gate",
+    confirmClass: "bg-red-600 hover:bg-red-700 text-white",
+  },
+  IN_PROGRESS: {
+    title: "Re-open Gate",
+    description: "This gate will be moved back to In Progress for the PM to rework deliverables.",
+    remarksLabel: "Notes (optional)",
+    remarksRequired: false,
+    confirmLabel: "Re-open Gate",
+    confirmClass: "bg-primary hover:bg-primary/90 text-primary-foreground",
+  },
+};
+
+function GateActionModal({
+  action,
+  onConfirm,
+  onClose,
+  saving,
+}: {
+  action: PendingAction;
+  onConfirm: (gateNo: number, newStatus: string, remarks: string) => void;
+  onClose: () => void;
+  saving: boolean;
+}) {
+  const [remarks, setRemarks] = useState("");
+  const config = ACTION_CONFIG[action.newStatus];
+
+  if (!config) return null;
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    onConfirm(action.gateNo, action.newStatus, remarks.trim());
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(26,26,67,0.4)" }}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl bg-white p-6"
+        style={{ boxShadow: "0 16px 48px rgba(26,26,67,0.24)" }}
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h2 className="text-base font-semibold" style={{ color: "#323338" }}>
+              {config.title}
+            </h2>
+            <p className="text-xs mt-0.5" style={{ color: "#676879" }}>
+              G{action.gateNo}: {action.gateName}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 rounded-full flex items-center justify-center transition-colors flex-shrink-0"
+            style={{ color: "#676879" }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "hsl(228 33% 94%)"; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ""; }}
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <p className="text-sm mb-4" style={{ color: "#676879" }}>
+          {config.description}
+        </p>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium mb-1" style={{ color: "#676879" }}>
+              {config.remarksLabel}
+              {config.remarksRequired && <span className="text-red-500 ml-0.5">*</span>}
+            </label>
+            <textarea
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              required={config.remarksRequired}
+              rows={3}
+              placeholder={config.remarksRequired ? "Required — enter a reason…" : "Add notes for context…"}
+              className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+              style={{ borderColor: "hsl(218 23% 88%)" }}
+            />
+          </div>
+
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              className="rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50"
+              style={{ borderColor: "hsl(218 23% 88%)", color: "#676879" }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "hsl(228 33% 97%)"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ""; }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving || (config.remarksRequired && !remarks.trim())}
+              className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors disabled:opacity-50 ${config.confirmClass}`}
+            >
+              {saving ? "Saving…" : config.confirmLabel}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── Gate panel ───────────────────────────────────────────────────────────────
 
 function GatePanel({
@@ -346,7 +496,7 @@ function GatePanel({
   gate: Gate;
   isCurrent: boolean;
   onDeliverableChange: (gateNo: number, deliverableId: string, status: DeliverableStatus) => void;
-  onAdvanceGate: (gateNo: number, newStatus: string) => void;
+  onAdvanceGate: (gateNo: number, newStatus: string, remarks: string) => void;
 }) {
   const [expanded, setExpanded] = useState(isCurrent);
   const done    = gate.deliverables.filter((d) => ["UPLOADED", "SUBMITTED", "APPROVED", "NOT_REQUIRED"].includes(d.status)).length;
@@ -355,7 +505,21 @@ function GatePanel({
 
   const gateStatusColour = GATE_STATUS_COLOURS[gate.status] ?? "text-muted-foreground";
 
+  const [pendingAction, setPendingAction] = useState<{ newStatus: string } | null>(null);
+  const [actionSaving, setActionSaving] = useState(false);
+
+  async function handleActionConfirm(gateNo: number, newStatus: string, remarks: string) {
+    setActionSaving(true);
+    try {
+      await onAdvanceGate(gateNo, newStatus, remarks);
+      setPendingAction(null);
+    } finally {
+      setActionSaving(false);
+    }
+  }
+
   return (
+    <>
     <div className={`rounded-lg border bg-card ${isCurrent ? "ring-2 ring-primary/30" : ""}`}>
       {/* Gate header */}
       <button
@@ -372,11 +536,17 @@ function GatePanel({
           {gate.gateNo}
         </div>
         <div className="flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium">G{gate.gateNo}: {gate.gateName}</span>
             {isCurrent && <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">Active</span>}
+            {gate.pmoFlagged && (
+              <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded font-medium bg-amber-100 text-amber-700">
+                <Flag className="w-3 h-3" />
+                PMO Flagged
+              </span>
+            )}
           </div>
-          <div className="flex items-center gap-3 mt-0.5">
+          <div className="flex items-center gap-3 mt-0.5 flex-wrap">
             <span className={`text-xs font-medium ${gateStatusColour}`}>{gate.status.replace("_", " ")}</span>
             <span className="text-xs text-muted-foreground">
               {requiredDone}/{required} required · {done}/{gate.deliverables.length} total
@@ -411,12 +581,30 @@ function GatePanel({
             ))}
           </div>
 
+          {/* Gate remarks / PMO comment */}
+          {(gate.remarks || gate.pmoComment) && (
+            <div className="px-4 py-3 border-t space-y-2 bg-muted/10">
+              {gate.remarks && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-0.5">Gate notes</p>
+                  <p className="text-sm whitespace-pre-wrap">{gate.remarks}</p>
+                </div>
+              )}
+              {gate.pmoComment && (
+                <div>
+                  <p className="text-xs font-medium text-amber-700 mb-0.5">PMO comment</p>
+                  <p className="text-sm text-amber-900 whitespace-pre-wrap">{gate.pmoComment}</p>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Gate actions */}
           {isCurrent && gate.status !== "APPROVED" && (
             <div className="flex items-center gap-2 px-4 py-3 border-t bg-muted/20">
               {gate.status === "IN_PROGRESS" && (
                 <button
-                  onClick={() => onAdvanceGate(gate.gateNo, "SUBMITTED")}
+                  onClick={() => setPendingAction({ newStatus: "SUBMITTED" })}
                   className="rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
                 >
                   Submit for Approval
@@ -425,13 +613,13 @@ function GatePanel({
               {gate.status === "SUBMITTED" && (
                 <>
                   <button
-                    onClick={() => onAdvanceGate(gate.gateNo, "APPROVED")}
+                    onClick={() => setPendingAction({ newStatus: "APPROVED" })}
                     className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700"
                   >
                     Approve Gate
                   </button>
                   <button
-                    onClick={() => onAdvanceGate(gate.gateNo, "REJECTED")}
+                    onClick={() => setPendingAction({ newStatus: "REJECTED" })}
                     className="rounded-md border border-red-300 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
                   >
                     Reject
@@ -440,7 +628,7 @@ function GatePanel({
               )}
               {gate.status === "REJECTED" && (
                 <button
-                  onClick={() => onAdvanceGate(gate.gateNo, "IN_PROGRESS")}
+                  onClick={() => setPendingAction({ newStatus: "IN_PROGRESS" })}
                   className="rounded-md border border-input px-3 py-1.5 text-xs font-medium hover:bg-muted"
                 >
                   Re-open Gate
@@ -451,6 +639,17 @@ function GatePanel({
         </div>
       )}
     </div>
+
+    {/* Gate action confirmation modal */}
+    {pendingAction && (
+      <GateActionModal
+        action={{ gateNo: gate.gateNo, gateName: gate.gateName, newStatus: pendingAction.newStatus }}
+        onConfirm={handleActionConfirm}
+        onClose={() => setPendingAction(null)}
+        saving={actionSaving}
+      />
+    )}
+    </>
   );
 }
 
@@ -461,6 +660,7 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"gates" | "documents">("gates");
 
   const fetchProject = useCallback(async () => {
     setLoading(true);
@@ -493,16 +693,12 @@ export default function ProjectDetailPage() {
     }
   };
 
-  const handleGateAdvance = async (gateNo: number, newStatus: string) => {
-    try {
-      const updated = await patch<ProjectDetail>(
-        `/projects/${params.id}/gates/${gateNo}/status`,
-        { status: newStatus },
-      );
-      setProject(updated);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to update gate status");
-    }
+  const handleGateAdvance = async (gateNo: number, newStatus: string, remarks: string) => {
+    const updated = await patch<ProjectDetail>(
+      `/projects/${params.id}/gates/${gateNo}/status`,
+      { status: newStatus, ...(remarks ? { remarks } : {}) },
+    );
+    setProject(updated);
   };
 
   if (loading) {
@@ -565,23 +761,60 @@ export default function ProjectDetailPage() {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_280px] gap-6">
-        {/* Left — Gates */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="font-semibold">Gate Progress</h2>
-            <span className="text-sm text-muted-foreground">
-              {completedDeliverables}/{totalDeliverables} deliverables done
-            </span>
+        {/* Left — Tabs: Gates | Documents */}
+        <div className="space-y-4">
+          {/* Tab bar */}
+          <div className="border-b">
+            <nav className="-mb-px flex gap-6">
+              {[
+                { key: "gates",     label: "Gate Progress" },
+                { key: "documents", label: "Documents" },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key as "gates" | "documents")}
+                  className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+                    activeTab === tab.key
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
           </div>
-          {project.gates.map((gate) => (
-            <GatePanel
-              key={gate.id}
-              gate={gate}
-              isCurrent={gate.gateNo === project.currentGateNo}
-              onDeliverableChange={handleDeliverableChange}
-              onAdvanceGate={handleGateAdvance}
+
+          {/* Gates tab */}
+          {activeTab === "gates" && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="font-semibold">Gate Progress</h2>
+                <span className="text-sm text-muted-foreground">
+                  {completedDeliverables}/{totalDeliverables} deliverables done
+                </span>
+              </div>
+              {project.gates.map((gate) => (
+                <GatePanel
+                  key={gate.id}
+                  gate={gate}
+                  isCurrent={gate.gateNo === project.currentGateNo}
+                  onDeliverableChange={handleDeliverableChange}
+                  onAdvanceGate={(gateNo, newStatus, remarks) => handleGateAdvance(gateNo, newStatus, remarks)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Documents tab */}
+          {activeTab === "documents" && (
+            <LinkedDocsSection
+              contextType="project"
+              contextId={project.id}
+              canUpload={true}
+              canDelete={true}
             />
-          ))}
+          )}
         </div>
 
         {/* Right — Info sidebar */}
