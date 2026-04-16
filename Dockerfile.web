@@ -19,6 +19,8 @@ RUN pnpm install --frozen-lockfile
 
 # ─── Build ─────────────────────────────────────────────────────────────────────
 FROM deps AS builder
+# Bust Docker cache to ensure fresh source copy on every build
+ARG RAILWAY_GIT_COMMIT_SHA
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 ARG NEXT_PUBLIC_API_URL
