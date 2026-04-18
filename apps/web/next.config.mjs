@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "standalone",
+  output: process.env.NEXT_STANDALONE === "true" ? "standalone" : undefined,
   // All pages use client-side hooks (useSearchParams, etc).
   // Disable static prerendering entirely — this is a logged-in CRM, not a public site.
   experimental: {

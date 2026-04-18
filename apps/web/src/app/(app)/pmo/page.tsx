@@ -111,6 +111,28 @@ type PmoMetrics = {
   overdueMilestones: OverdueMilestone[];
   stalledProjects: StalledProject[];
   criticalOpenIssues: CriticalIssue[];
+  contractVariance: {
+    activeCount: number;
+    handoverBuckets: { NOT_STARTED: number; READY: number; IN_PROGRESS: number; COMPLETED: number };
+    byCurrency: {
+      currency: string;
+      contracted: number;
+      invoiced: number;
+      paid: number;
+      outstanding: number;
+      count: number;
+      invoicedPercent: number;
+      paidPercent: number;
+    }[];
+  };
+  recentAudit: {
+    id: string;
+    resource: string;
+    resourceId: string;
+    action: string;
+    performedAt: string;
+    user: { id: string; name: string } | null;
+  }[];
   generatedAt: string;
 };
 
@@ -252,7 +274,8 @@ export default function PmoPage() {
 
   const { quickCounts, ragBreakdown, gateDistribution, projectsWithBlocker,
           pendingGateApprovals, overdueDeliverables, overdueMilestones,
-          stalledProjects, criticalOpenIssues, generatedAt } = data;
+          stalledProjects, criticalOpenIssues, contractVariance, recentAudit,
+          generatedAt } = data;
 
   return (
     <div className="space-y-8">
@@ -585,9 +608,92 @@ export default function PmoPage() {
         </div>
       )}
 
+      {/* ── Contract cash position ───────────────────────────────────────── */}
+      {contractVariance.activeCount > 0 && (
+        <div className="space-y-3">
+          <SectionHeader title="Commercial cash position" count={contractVariance.activeCount} />
+          <div className="rounded-lg border bg-card p-5 space-y-4">
+            {/* Handover state mini-counts */}
+            <div className="grid grid-cols-4 gap-3">
+              {(["NOT_STARTED", "READY", "IN_PROGRESS", "COMPLETED"] as const).map((k) => (
+                <div key={k} className="text-center">
+                  <div className="text-2xl font-semibold">{contractVariance.handoverBuckets[k]}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    Handover · {k.replace("_", " ").toLowerCase()}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Per-currency variance roll */}
+            {contractVariance.byCurrency.map((row) => (
+              <div key={row.currency} className="border-t pt-3">
+                <div className="grid grid-cols-4 gap-3 text-sm">
+                  <Stat label={`Contracted (${row.currency})`} value={fmt(row.contracted, row.currency)} />
+                  <Stat label="Invoiced"   value={fmt(row.invoiced, row.currency)}    sub={`${row.invoicedPercent}%`} colour="text-blue-600" />
+                  <Stat label="Paid"       value={fmt(row.paid, row.currency)}        sub={`${row.paidPercent}%`}     colour="text-green-700" />
+                  <Stat label="Outstanding" value={fmt(row.outstanding, row.currency)}                                 colour={row.outstanding > 0 ? "text-red-600" : "text-muted-foreground"} />
+                </div>
+                {/* Stacked bar */}
+                <div className="mt-2 h-2 rounded-full overflow-hidden flex bg-muted">
+                  <div className="bg-green-500" style={{ width: `${Math.min(100, row.paidPercent)}%` }} />
+                  <div className="bg-amber-400" style={{ width: `${Math.min(100 - row.paidPercent, Math.max(0, row.invoicedPercent - row.paidPercent))}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Recent audit activity ────────────────────────────────────────── */}
+      {recentAudit.length > 0 && (
+        <div className="space-y-3">
+          <SectionHeader title="Recent activity" count={recentAudit.length} />
+          <div className="rounded-lg border bg-card p-3">
+            <ul className="divide-y divide-border/40 text-sm">
+              {recentAudit.map((a) => (
+                <li key={a.id} className="flex items-center gap-3 py-1.5">
+                  <span className="text-xs text-muted-foreground w-32 flex-shrink-0">
+                    {new Date(a.performedAt).toLocaleString("en-MY", { dateStyle: "short", timeStyle: "short" })}
+                  </span>
+                  <span className="inline-flex flex-shrink-0 rounded-full px-2 py-0.5 text-xs font-medium bg-blue-50 text-blue-700">
+                    {a.action.replace(/_/g, " ")}
+                  </span>
+                  <span className="flex-1 text-xs truncate">
+                    <span className="text-muted-foreground">{a.resource}</span> ·{" "}
+                    <span className="font-mono">{a.resourceId.slice(0, 14)}…</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground flex-shrink-0">{a.user?.name ?? "(system)"}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="text-right pt-2">
+              <Link href="/admin/audit" className="text-xs text-primary hover:underline">
+                Open full audit log →
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
       <p className="text-xs text-muted-foreground text-right">
         Data as of {new Date(generatedAt).toLocaleString()}
       </p>
+    </div>
+  );
+}
+
+// Helpers used by the two new sections
+function fmt(n: number, ccy: string): string {
+  return `${ccy} ${n.toLocaleString("en-MY", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+}
+
+function Stat({ label, value, sub, colour }: { label: string; value: string; sub?: string; colour?: string }) {
+  return (
+    <div>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className={cn("text-sm font-semibold", colour)}>{value}</div>
+      {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
     </div>
   );
 }

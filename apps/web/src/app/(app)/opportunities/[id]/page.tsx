@@ -15,6 +15,7 @@ import {
   COMMERCIAL_MODEL_LABELS,
 } from "@solaroo/types";
 import { LinkedDocsSection } from "@/components/documents/linked-docs-section";
+import { LinkedContractsSection } from "@/components/contracts/linked-contracts-section";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -588,6 +589,12 @@ export default function OpportunityDetailPage() {
               <p className="text-sm text-muted-foreground whitespace-pre-line">{opp.summary}</p>
             </div>
           )}
+
+          {/* Linked contracts — bridge from won/awarded sales work to project execution */}
+          <div className="md:col-span-2">
+            <LinkedContractsSection opportunityId={opp.id} />
+          </div>
+
 
           {(opp.risks || opp.competitors) && (
             <div className="md:col-span-2 grid gap-4 sm:grid-cols-2">

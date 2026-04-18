@@ -17,16 +17,32 @@ import {
   CreateUserSchema,
   UpdateUserSchema,
   ResetPasswordSchema,
+  AuditQuerySchema,
   type UserQueryDto,
   type CreateUserDto,
   type UpdateUserDto,
   type ResetPasswordDto,
+  type AuditQueryDto,
 } from './admin.dto';
 import type { PaginatedResult } from '@solaroo/types';
+import { AuditService, type AuditLogItem } from '../../common/audit/audit.service';
 
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly audit: AuditService,
+  ) {}
+
+  // GET /api/admin/audit — query the AuditLog (system-wide or per-resource).
+  // Permission: audit_log:view (granted to SUPER_ADMIN, DIRECTOR, PMO_MANAGER).
+  @Get('audit')
+  @RequirePermission('audit_log', 'view')
+  listAudit(
+    @Query(new ZodValidationPipe(AuditQuerySchema)) query: AuditQueryDto,
+  ): Promise<PaginatedResult<AuditLogItem>> {
+    return this.audit.findAll(query);
+  }
 
   // GET /api/admin/users/dropdown
   // No permission gate — any authenticated user can fetch users for select widgets.

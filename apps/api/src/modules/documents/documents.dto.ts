@@ -19,14 +19,15 @@ export const UploadDocumentSchema = z.object({
   docType:       z.enum(DOC_CATEGORIES),
   opportunityId: z.string().cuid().optional(),
   projectId:     z.string().cuid().optional(),
+  contractId:    z.string().cuid().optional(),
   notes:         z.string().max(1000).optional(),
   fileBase64:    z.string().min(1),
   fileName:      z.string().min(1).max(255),
   mimeType:      z.string().min(1).max(100),
   fileSizeBytes: z.coerce.number().int().positive(),
 }).refine(
-  (d) => !!(d.opportunityId || d.projectId),
-  { message: 'Provide either opportunityId or projectId', path: ['opportunityId'] },
+  (d) => !!(d.opportunityId || d.projectId || d.contractId),
+  { message: 'Provide opportunityId, projectId or contractId', path: ['opportunityId'] },
 );
 
 // ─── Query ───────────────────────────────────────────────────────────────────
@@ -34,6 +35,7 @@ export const UploadDocumentSchema = z.object({
 export const DocumentQuerySchema = z.object({
   opportunityId: z.string().optional(),
   projectId:     z.string().optional(),
+  contractId:    z.string().optional(),
   docType:       z.string().optional(),
   status:        z.string().optional(),
   search:        z.string().optional(),
@@ -45,3 +47,15 @@ export const DocumentQuerySchema = z.object({
 
 export type UploadDocumentDto = z.infer<typeof UploadDocumentSchema>;
 export type DocumentQueryDto  = z.infer<typeof DocumentQuerySchema>;
+
+// ─── Revision approve / reject ───────────────────────────────────────────────
+
+export const ApproveRevisionSchema = z.object({
+  notes: z.string().max(1000).optional(),
+});
+export type ApproveRevisionDto = z.infer<typeof ApproveRevisionSchema>;
+
+export const RejectRevisionSchema = z.object({
+  reason: z.string().min(1).max(1000),
+});
+export type RejectRevisionDto = z.infer<typeof RejectRevisionSchema>;

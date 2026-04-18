@@ -9,6 +9,7 @@ import {
   MapPin,
   TrendingUp,
   FileText,
+  FileSignature,
   FolderKanban,
   ShieldCheck,
   ShoppingCart,
@@ -16,6 +17,7 @@ import {
   Wrench,
   BarChart3,
   Settings,
+  History,
 } from "lucide-react";
 import Image from "next/image";
 import { useState } from "react";
@@ -33,6 +35,7 @@ const ALL_NAV_ITEMS: { href: NavHref; label: string; icon: React.ElementType }[]
   { href: "/sites",         label: "Sites",         icon: MapPin },
   { href: "/opportunities", label: "Opportunities", icon: TrendingUp },
   { href: "/proposals",     label: "Proposals",     icon: FileText },
+  { href: "/contracts",     label: "Contracts",     icon: FileSignature },
   { href: "/projects",      label: "Projects",      icon: FolderKanban },
   { href: "/pmo",           label: "PMO",           icon: ShieldCheck },
   { href: "/procurement",   label: "Procurement",   icon: ShoppingCart },
@@ -135,32 +138,58 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Admin section — Super Admin only */}
-      {isSuperAdmin && (
-        <div className="px-2 py-2" style={{ borderTop: "1px solid #e6e9ef" }}>
+      {/* Admin section — Super Admin (user mgmt) + leadership (audit) */}
+      {(isSuperAdmin || roleName === "DIRECTOR" || roleName === "PMO_MANAGER") && (
+        <div className="px-2 py-2 space-y-0.5" style={{ borderTop: "1px solid #e6e9ef" }}>
+          {isSuperAdmin && (
+            <Link
+              href="/admin/users"
+              className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150"
+              style={
+                pathname.startsWith("/admin/users")
+                  ? { background: "#dce9fc", color: "#0073ea" }
+                  : { color: "#676879" }
+              }
+              onMouseEnter={(e) => {
+                if (!pathname.startsWith("/admin/users")) {
+                  (e.currentTarget as HTMLElement).style.background = "#f0f4fb";
+                  (e.currentTarget as HTMLElement).style.color = "#323338";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!pathname.startsWith("/admin/users")) {
+                  (e.currentTarget as HTMLElement).style.background = "";
+                  (e.currentTarget as HTMLElement).style.color = "#676879";
+                }
+              }}
+            >
+              <Settings className="w-4 h-4 flex-shrink-0" />
+              User Management
+            </Link>
+          )}
           <Link
-            href="/admin/users"
+            href="/admin/audit"
             className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150"
             style={
-              pathname.startsWith("/admin")
+              pathname.startsWith("/admin/audit")
                 ? { background: "#dce9fc", color: "#0073ea" }
                 : { color: "#676879" }
             }
             onMouseEnter={(e) => {
-              if (!pathname.startsWith("/admin")) {
+              if (!pathname.startsWith("/admin/audit")) {
                 (e.currentTarget as HTMLElement).style.background = "#f0f4fb";
                 (e.currentTarget as HTMLElement).style.color = "#323338";
               }
             }}
             onMouseLeave={(e) => {
-              if (!pathname.startsWith("/admin")) {
+              if (!pathname.startsWith("/admin/audit")) {
                 (e.currentTarget as HTMLElement).style.background = "";
                 (e.currentTarget as HTMLElement).style.color = "#676879";
               }
             }}
           >
-            <Settings className="w-4 h-4 flex-shrink-0" />
-            User Management
+            <History className="w-4 h-4 flex-shrink-0" />
+            Audit Log
           </Link>
         </div>
       )}

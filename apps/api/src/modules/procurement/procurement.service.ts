@@ -4,6 +4,8 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { AuditService } from '../../common/audit/audit.service';
 import { UserContext, PaginatedResult } from '@solaroo/types';
 import { Prisma } from '@solaroo/db';
 import {
@@ -195,7 +197,11 @@ const PO_DETAIL_SELECT = {
 
 @Injectable()
 export class ProcurementService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+    private readonly audit: AuditService,
+  ) {}
 
   // ═══════════════════════════════════════════════════════════════════════════
   // VENDORS
@@ -513,6 +519,13 @@ export class ProcurementService {
     user: UserContext,
   ): Promise<PoDetail> {
     await this.findPurchaseOrderById(id, user);
+
+    // Capture pre-update status to detect actual change
+    const before = await this.prisma.purchaseOrder.findUnique({
+      where: { id },
+      select: { status: true, projectId: true, poNo: true },
+    });
+
     const po = await this.prisma.purchaseOrder.update({
       where: { id },
       data: {
@@ -521,7 +534,88 @@ export class ProcurementService {
       },
       select: PO_DETAIL_SELECT,
     });
+
+    // Audit + notification — only fire if status actually changed
+    if (before && before.status !== dto.status) {
+      this.audit.record({
+        actor: user,
+        resource: 'purchase_order',
+        resourceId: id,
+        action: 'status_changed',
+        field: 'status',
+        oldValue: before.status,
+        newValue: dto.status,
+        metadata: {
+          poNo: before.poNo,
+          projectId: before.projectId,
+          ...(dto.notes && { notes: dto.notes }),
+        },
+      }).catch(() => {});
+
+      this.sendPoStatusNotification(
+        id,
+        before.poNo,
+        before.projectId,
+        before.status,
+        dto.status,
+        user,
+      ).catch(() => {});
+    }
+
     return po as unknown as PoDetail;
+  }
+
+  // ─── PO status change notification ────────────────────────────────────────
+
+  private async sendPoStatusNotification(
+    poId: string,
+    poNo: string,
+    projectId: string | null,
+    oldStatus: string,
+    newStatus: string,
+    actor: UserContext,
+  ): Promise<void> {
+    // Recipients: project PM + project members (if PO is project-linked)
+    //             plus all PROCUREMENT-role users.
+    const recipients = new Set<string>();
+
+    if (projectId) {
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        select: {
+          projectManagerId: true,
+          members: { select: { userId: true } },
+        },
+      });
+      if (project) {
+        recipients.add(project.projectManagerId);
+        for (const m of project.members) recipients.add(m.userId);
+      }
+    }
+
+    const procurementIds = await this.notifications.getUserIdsByRoles(['PROCUREMENT']);
+    for (const pid of procurementIds) recipients.add(pid);
+
+    recipients.delete(actor.id);
+    if (recipients.size === 0) return;
+
+    const projectName = projectId
+      ? await this.prisma.project
+          .findUnique({ where: { id: projectId }, select: { name: true } })
+          .then((p) => p?.name ?? 'project')
+      : 'Unassigned PO';
+
+    await this.notifications.createMany(
+      Array.from(recipients).map((userId) => ({
+        userId,
+        title: `PO ${poNo}: ${newStatus}`,
+        body: `${projectName} — status changed from ${oldStatus} to ${newStatus}.`,
+        type: 'po_status_changed',
+        linkUrl: '/procurement?tab=purchase-orders',
+        resource: 'purchase_order',
+        resourceId: poId,
+      })),
+    );
   }
 
   private async generatePoNumber(): Promise<string> {

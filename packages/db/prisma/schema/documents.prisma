@@ -32,12 +32,14 @@ model Document {
   projectId           String?
   opportunityId       String?
   proposalVersionId   String?
+  contractId          String?           // links doc to a specific contract (e.g. signed PDF)
   deliverableId       String?           // links doc to a specific gate deliverable
 
   owner               User?             @relation("DocumentOwner", fields: [ownerUserId], references: [id])
   project             Project?          @relation(fields: [projectId], references: [id])
   opportunity         Opportunity?      @relation(fields: [opportunityId], references: [id])
   proposalVersion     ProposalVersion?  @relation(fields: [proposalVersionId], references: [id])
+  contract            Contract?         @relation(fields: [contractId], references: [id])
   deliverable         GateDeliverable?  @relation(fields: [deliverableId], references: [id])
 
   revisions           DocumentRevision[]

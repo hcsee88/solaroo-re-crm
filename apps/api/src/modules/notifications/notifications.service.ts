@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
-import { UserContext } from '@solaroo/types';
+import { UserContext, PaginatedResult } from '@solaroo/types';
 
 export type NotificationPayload = {
   userId: string;
@@ -84,6 +84,46 @@ export class NotificationsService {
     }) as Promise<NotificationItem[]>;
   }
 
+  // ── Paginated list (for the full /notifications page) ────────────────────
+  async findAllPaginated(
+    user: UserContext,
+    opts: { page: number; pageSize: number; includeDismissed: boolean },
+  ): Promise<PaginatedResult<NotificationItem>> {
+    const { page, pageSize, includeDismissed } = opts;
+    const where = {
+      userId: user.id,
+      ...(includeDismissed ? {} : { status: { not: 'DISMISSED' as const } }),
+    };
+    const [total, items] = await Promise.all([
+      this.prisma.notification.count({ where }),
+      this.prisma.notification.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          title: true,
+          body: true,
+          type: true,
+          status: true,
+          linkUrl: true,
+          resource: true,
+          resourceId: true,
+          createdAt: true,
+          readAt: true,
+        },
+      }),
+    ]);
+    return {
+      items: items as NotificationItem[],
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    };
+  }
+
   // ── Unread count (for bell badge) ─────────────────────────────────────────
   async getUnreadCount(user: UserContext): Promise<{ count: number }> {
     const count = await this.prisma.notification.count({
@@ -127,9 +167,10 @@ export class NotificationsService {
     return users.map((u) => u.id);
   }
 
-  /** Get IDs of all team members on a project (not including PM — add separately) */
+  /** Get IDs of all members on a project (not including PM — add separately).
+   *  Uses ProjectMember (canonical access-control table), not ProjectTeamAssignment. */
   async getProjectMemberIds(projectId: string): Promise<string[]> {
-    const members = await this.prisma.projectTeamAssignment.findMany({
+    const members = await this.prisma.projectMember.findMany({
       where: { projectId },
       select: { userId: true },
     });

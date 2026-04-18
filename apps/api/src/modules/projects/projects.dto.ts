@@ -77,3 +77,11 @@ export const UpdateDeliverableSchema = z.object({
   notes:  z.string().max(1000).nullable().optional(),
 });
 export type UpdateDeliverableDto = z.infer<typeof UpdateDeliverableSchema>;
+
+// ─── Project member ────────────────────────────────────────────────────────────
+
+export const AddProjectMemberSchema = z.object({
+  userId:     z.string().cuid(),
+  memberRole: z.string().min(1).max(50).default('MEMBER'),
+});
+export type AddProjectMemberDto = z.infer<typeof AddProjectMemberSchema>;

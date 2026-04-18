@@ -3,12 +3,18 @@ import {
   Get,
   Patch,
   Param,
+  Query,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { UserContext } from '@solaroo/types';
+import { UserContext, PaginatedResult } from '@solaroo/types';
+import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 import { NotificationsService, NotificationItem } from './notifications.service';
+import {
+  NotificationListQuerySchema,
+  NotificationListQueryDto,
+} from './notifications.dto';
 
 @Controller('notifications')
 export class NotificationsController {
@@ -24,6 +30,16 @@ export class NotificationsController {
   @Get('unread-count')
   getUnreadCount(@CurrentUser() user: UserContext): Promise<{ count: number }> {
     return this.notificationsService.getUnreadCount(user);
+  }
+
+  // GET /api/notifications/paginated — paginated list (for the full /notifications page)
+  @Get('paginated')
+  findAllPaginated(
+    @Query(new ZodValidationPipe(NotificationListQuerySchema))
+    query: NotificationListQueryDto,
+    @CurrentUser() user: UserContext,
+  ): Promise<PaginatedResult<NotificationItem>> {
+    return this.notificationsService.findAllPaginated(user, query);
   }
 
   // PATCH /api/notifications/read-all — mark every UNREAD notification read

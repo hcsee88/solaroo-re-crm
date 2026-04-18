@@ -115,6 +115,8 @@ export const PERMISSION_DEFS: PermissionDef[] = [
   { resource: 'project', action: 'approve', scope: 'all',      roles: ['DIRECTOR'] },
   { resource: 'project', action: 'export',  scope: 'all',      roles: ['DIRECTOR', 'PMO_MANAGER', 'SALES_MANAGER', 'FINANCE_ADMIN'] },
   { resource: 'project', action: 'export',  scope: 'assigned', roles: ['PROJECT_MANAGER'] },
+  { resource: 'project', action: 'manage_members', scope: 'all',      roles: ['DIRECTOR', 'PMO_MANAGER'] },
+  { resource: 'project', action: 'manage_members', scope: 'assigned', roles: ['PROJECT_MANAGER'] },
 
   // ─── Gates & Milestones ────────────────────────────────────────────────────
   { resource: 'project_gate', action: 'view',    scope: 'all',      roles: ['DIRECTOR', 'PMO_MANAGER', 'SALES_MANAGER', 'DESIGN_LEAD', 'FINANCE_ADMIN'] },
@@ -283,13 +285,16 @@ export const PERMISSION_DEFS: PermissionDef[] = [
   { resource: 'warranty_record', action: 'edit',   scope: 'all',      roles: ['DIRECTOR'] },
 
   // ─── Contracts & Finance ───────────────────────────────────────────────────
-  { resource: 'contract', action: 'view',        scope: 'all',      roles: ['DIRECTOR', 'FINANCE_ADMIN'] },
+  { resource: 'contract', action: 'view',        scope: 'all',      roles: ['DIRECTOR', 'PMO_MANAGER', 'FINANCE_ADMIN'] },
   { resource: 'contract', action: 'view',        scope: 'team',     roles: ['SALES_MANAGER'] },
-  { resource: 'contract', action: 'view',        scope: 'assigned', roles: ['PROJECT_MANAGER'] },
-  { resource: 'contract', action: 'view_value',  scope: 'all',      roles: ['DIRECTOR', 'FINANCE_ADMIN', 'SALES_MANAGER'] },
-  { resource: 'contract', action: 'create',      scope: 'all',      roles: ['DIRECTOR', 'FINANCE_ADMIN'] },
-  { resource: 'contract', action: 'edit',        scope: 'all',      roles: ['DIRECTOR', 'FINANCE_ADMIN'] },
-  { resource: 'contract', action: 'approve',     scope: 'all',      roles: ['DIRECTOR'] },
+  { resource: 'contract', action: 'view',        scope: 'assigned', roles: ['PROJECT_MANAGER', 'PROJECT_ENGINEER'] },
+  { resource: 'contract', action: 'view_value',  scope: 'all',      roles: ['DIRECTOR', 'FINANCE_ADMIN', 'SALES_MANAGER', 'PMO_MANAGER'] },
+  { resource: 'contract', action: 'create',      scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER', 'FINANCE_ADMIN'] },
+  { resource: 'contract', action: 'edit',        scope: 'all',      roles: ['DIRECTOR', 'FINANCE_ADMIN', 'PMO_MANAGER'] },
+  { resource: 'contract', action: 'edit',        scope: 'team',     roles: ['SALES_MANAGER'] },
+  { resource: 'contract', action: 'approve',     scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER'] },
+  { resource: 'contract', action: 'handover',    scope: 'all',      roles: ['DIRECTOR', 'PMO_MANAGER'] },
+  { resource: 'contract', action: 'handover',    scope: 'assigned', roles: ['PROJECT_MANAGER'] },
   { resource: 'contract', action: 'export',      scope: 'all',      roles: ['DIRECTOR', 'FINANCE_ADMIN'] },
 
   { resource: 'invoice_milestone', action: 'view',    scope: 'all',      roles: ['DIRECTOR', 'FINANCE_ADMIN'] },
@@ -327,6 +332,9 @@ export const PERMISSION_DEFS: PermissionDef[] = [
   { resource: 'role_admin', action: 'view',   scope: 'all', roles: ['SUPER_ADMIN'] },
   { resource: 'role_admin', action: 'create', scope: 'all', roles: ['SUPER_ADMIN'] },
   { resource: 'role_admin', action: 'edit',   scope: 'all', roles: ['SUPER_ADMIN'] },
+
+  // Audit log — read-only governance trail. Visible to SUPER_ADMIN + commercial/PMO leadership.
+  { resource: 'audit_log', action: 'view', scope: 'all', roles: ['SUPER_ADMIN', 'DIRECTOR', 'PMO_MANAGER'] },
 ];
 
 export async function seedPermissions(prisma: PrismaClient): Promise<void> {

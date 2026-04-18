@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Param,
   Query,
@@ -23,6 +24,10 @@ import {
   DocumentQuerySchema,
   UploadDocumentDto,
   DocumentQueryDto,
+  ApproveRevisionSchema,
+  ApproveRevisionDto,
+  RejectRevisionSchema,
+  RejectRevisionDto,
 } from './documents.dto';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 
@@ -90,6 +95,34 @@ export class DocumentsController {
     res.header('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
     res.header('Content-Type', mimeType);
     res.send(stream);
+  }
+
+  // ── Approve a revision ────────────────────────────────────────────────────
+
+  @Patch(':id/revisions/:revisionId/approve')
+  @RequirePermission('document', 'approve')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  approveRevision(
+    @Param('id') id: string,
+    @Param('revisionId') revisionId: string,
+    @Body(new ZodValidationPipe(ApproveRevisionSchema)) dto: ApproveRevisionDto,
+    @CurrentUser() user: UserContext,
+  ): Promise<void> {
+    return this.documentsService.approveRevision(id, revisionId, dto, user);
+  }
+
+  // ── Reject a revision ─────────────────────────────────────────────────────
+
+  @Patch(':id/revisions/:revisionId/reject')
+  @RequirePermission('document', 'approve')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  rejectRevision(
+    @Param('id') id: string,
+    @Param('revisionId') revisionId: string,
+    @Body(new ZodValidationPipe(RejectRevisionSchema)) dto: RejectRevisionDto,
+    @CurrentUser() user: UserContext,
+  ): Promise<void> {
+    return this.documentsService.rejectRevision(id, revisionId, dto, user);
   }
 
   // ── Delete a document ─────────────────────────────────────────────────────

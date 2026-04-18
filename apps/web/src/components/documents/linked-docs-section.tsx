@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { get, del, uploadFile, API_BASE_URL_EXPORT } from "@/lib/api-client";
+import { get, del, patch, uploadFile, API_BASE_URL_EXPORT } from "@/lib/api-client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -116,13 +116,53 @@ function RevisionDialog({
   const [revisions, setRevisions] = useState<DocRevision[]>([]);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState<string | null>(null);
+  const [busyId, setBusyId]       = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
+    setLoading(true);
+    setError(null);
     get<DocRevision[]>(`/documents/${doc.id}/revisions`)
       .then(setRevisions)
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load revisions"))
       .finally(() => setLoading(false));
   }, [doc.id]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  async function approve(rev: DocRevision) {
+    setBusyId(rev.id);
+    setActionError(null);
+    try {
+      await patch(`/documents/${doc.id}/revisions/${rev.id}/approve`, {});
+      refresh();
+    } catch (e) {
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      setActionError(status === 403
+        ? "You don't have permission to approve documents"
+        : ((e as Error).message ?? "Approval failed"));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function reject(rev: DocRevision) {
+    const reason = window.prompt("Reason for rejection? (required)");
+    if (!reason || !reason.trim()) return;
+    setBusyId(rev.id);
+    setActionError(null);
+    try {
+      await patch(`/documents/${doc.id}/revisions/${rev.id}/reject`, { reason: reason.trim() });
+      refresh();
+    } catch (e) {
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      setActionError(status === 403
+        ? "You don't have permission to reject documents"
+        : ((e as Error).message ?? "Rejection failed"));
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -178,7 +218,27 @@ function RevisionDialog({
                     <td className="px-3 py-2.5 text-muted-foreground">{fmtDate(r.uploadedAt)}</td>
                     <td className="px-3 py-2.5 text-muted-foreground">{r.uploadedBy?.name ?? "—"}</td>
                     <td className="px-3 py-2.5 text-muted-foreground tabular-nums">{fmtBytes(r.fileSizeBytes)}</td>
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                      {r.approvalStatus === "PENDING" && (
+                        <>
+                          <button
+                            onClick={() => approve(r)}
+                            disabled={busyId === r.id}
+                            className="text-xs px-2 py-0.5 mr-1 rounded font-medium text-green-700 bg-green-50 hover:bg-green-100 disabled:opacity-50"
+                            title="Approve revision"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => reject(r)}
+                            disabled={busyId === r.id}
+                            className="text-xs px-2 py-0.5 mr-2 rounded font-medium text-red-700 bg-red-50 hover:bg-red-100 disabled:opacity-50"
+                            title="Reject revision (requires reason)"
+                          >
+                            Reject
+                          </button>
+                        </>
+                      )}
                       <a
                         href={`${API_BASE_URL_EXPORT}/api/documents/${doc.id}/download`}
                         target="_blank"
@@ -192,6 +252,9 @@ function RevisionDialog({
                 ))}
               </tbody>
             </table>
+          )}
+          {actionError && (
+            <p className="mt-3 text-xs text-destructive">{actionError}</p>
           )}
         </div>
       </div>
@@ -207,7 +270,7 @@ function UploadForm({
   onUploaded,
   onCancel,
 }: {
-  contextType: "opportunity" | "project";
+  contextType: "opportunity" | "project" | "contract";
   contextId: string;
   onUploaded: (doc: LinkedDoc) => void;
   onCancel: () => void;
@@ -233,7 +296,9 @@ function UploadForm({
         title: title.trim(),
         docType,
         ...(notes.trim() && { notes: notes.trim() }),
-        [contextType === "opportunity" ? "opportunityId" : "projectId"]: contextId,
+        ...(contextType === "opportunity" && { opportunityId: contextId }),
+        ...(contextType === "project"     && { projectId: contextId }),
+        ...(contextType === "contract"    && { contractId: contextId }),
       };
       const doc = await uploadFile<LinkedDoc>("/documents/upload", file, fields);
       onUploaded(doc);
@@ -353,7 +418,7 @@ export function LinkedDocsSection({
   canDelete = false,
 }: {
   /** Whether this is linked to an opportunity or project */
-  contextType: "opportunity" | "project";
+  contextType: "opportunity" | "project" | "contract";
   /** The opportunity or project ID */
   contextId: string;
   /** Show upload button (default true) */
@@ -371,7 +436,10 @@ export function LinkedDocsSection({
     setLoading(true);
     setError(null);
     try {
-      const param = contextType === "opportunity" ? "opportunityId" : "projectId";
+      const param =
+        contextType === "opportunity" ? "opportunityId"
+        : contextType === "project"   ? "projectId"
+        :                               "contractId";
       // Request up to 100 docs; for a single context this is always sufficient
       const result = await get<{ items: LinkedDoc[] } | LinkedDoc[]>(
         `/documents?${param}=${contextId}&pageSize=100&sortBy=createdAt&sortDir=desc`,

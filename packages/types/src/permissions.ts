@@ -24,11 +24,15 @@ export const RESOURCES = [
   // Sensitive pseudo-resources (field-level gates)
   'margin', 'cost', 'payment_status',
   // Admin
-  'reporting', 'user_admin', 'role_admin',
+  'reporting', 'user_admin', 'role_admin', 'audit_log',
 ] as const;
 
 export const ACTIONS = [
   'view', 'create', 'edit', 'delete', 'submit', 'approve', 'export',
+  // Project team management — add/remove ProjectMember rows
+  'manage_members',
+  // Contract handover workflow — mark ready / begin / checklist / complete
+  'handover',
   // Sensitive sub-actions on pseudo-resources
   'view_estimated', // margin — Sales Manager / Sales Engineer
   'view_actual',    // margin — Director / Finance only

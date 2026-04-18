@@ -3,11 +3,21 @@
 enum ContractStatus {
   DRAFT
   UNDER_REVIEW
+  AWARDED          // Customer has awarded the contract; signing/handover follow
   SIGNED
   ACTIVE
   CLOSED
   DISPUTED
   TERMINATED
+}
+
+// Sub-workflow tracking the award→handover bridge into project execution.
+// Independent of ContractStatus so commercial and operational phases compose cleanly.
+enum HandoverStatus {
+  NOT_STARTED
+  READY
+  IN_PROGRESS
+  COMPLETED
 }
 
 enum InvoiceStatus {
@@ -24,6 +34,10 @@ model Contract {
   contractNo      String         @unique
   opportunityId   String?
   accountId       String
+  // Optional cross-references for richer traceability (set by sales/PM at award time).
+  siteId                       String?
+  proposalVersionId            String?
+  projectManagerCandidateId    String?
   title           String
   status          ContractStatus @default(DRAFT)
   scopeSummary    String?
@@ -31,20 +45,34 @@ model Contract {
   retentionPercent Decimal?      @db.Decimal(5, 2)
   contractValue   Decimal        @db.Decimal(15, 2)
   currency        String         @default("MYR")
+  awardedDate     DateTime?
   signedDate      DateTime?
   commencementDate DateTime?
+  targetCod        DateTime?     // Target Commercial Operation Date
   completionDate  DateTime?
   defectsLiabilityMonths Int?
   notes           String?
   fileUrl         String?
+  // Handover workflow state
+  handoverStatus       HandoverStatus  @default(NOT_STARTED)
+  handoverChecklist    Json?           // Free-form list: [{ key, label, done, completedAt?, completedBy? }]
+  handoverCompletedAt  DateTime?
+  handoverCompletedById String?
+  // Linked project — set when handover completes and the project is created/found
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  account         Account        @relation(fields: [accountId], references: [id])
+  account                    Account           @relation(fields: [accountId], references: [id])
+  opportunity                Opportunity?      @relation(fields: [opportunityId], references: [id])
+  site                       Site?             @relation(fields: [siteId], references: [id])
+  proposalVersion            ProposalVersion?  @relation(fields: [proposalVersionId], references: [id])
+  projectManagerCandidate    User?             @relation("ContractPMCandidate", fields: [projectManagerCandidateId], references: [id])
+  handoverCompletedBy        User?             @relation("ContractHandoverCompleter", fields: [handoverCompletedById], references: [id])
   project         Project?
   milestones      ContractMilestone[]
   invoices        Invoice[]
   budgets         Budget[]
+  documents       Document[]
 
   @@map("contracts")
 }

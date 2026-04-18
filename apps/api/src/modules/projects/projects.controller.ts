@@ -3,10 +3,13 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
   ParseIntPipe,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequirePermission } from '../../common/authz/require-permission.decorator';
@@ -24,6 +27,8 @@ import {
   UpdateGateStatusDto,
   UpdateDeliverableSchema,
   UpdateDeliverableDto,
+  AddProjectMemberSchema,
+  AddProjectMemberDto,
 } from './projects.dto';
 
 @Controller('projects')
@@ -93,5 +98,28 @@ export class ProjectsController {
     @CurrentUser() user: UserContext,
   ) {
     return this.projectsService.updateDeliverable(id, deliverableId, dto, user);
+  }
+
+  // POST /api/projects/:id/members — add a project team member
+  @Post(':id/members')
+  @RequirePermission('project', 'manage_members')
+  addMember(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(AddProjectMemberSchema)) dto: AddProjectMemberDto,
+    @CurrentUser() user: UserContext,
+  ) {
+    return this.projectsService.addMember(id, dto, user);
+  }
+
+  // DELETE /api/projects/:id/members/:userId — remove a project team member
+  @Delete(':id/members/:userId')
+  @RequirePermission('project', 'manage_members')
+  @HttpCode(HttpStatus.OK)
+  removeMember(
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+    @CurrentUser() user: UserContext,
+  ) {
+    return this.projectsService.removeMember(id, userId, user);
   }
 }

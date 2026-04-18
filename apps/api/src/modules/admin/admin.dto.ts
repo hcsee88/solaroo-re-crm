@@ -1,5 +1,16 @@
 import { z } from 'zod';
 
+export const AuditQuerySchema = z.object({
+  resource:   z.string().optional(),
+  resourceId: z.string().optional(),
+  userId:     z.string().optional(),
+  from:       z.coerce.date().optional(),
+  to:         z.coerce.date().optional(),
+  page:       z.coerce.number().int().min(1).default(1),
+  pageSize:   z.coerce.number().int().min(1).max(100).default(50),
+});
+export type AuditQueryDto = z.infer<typeof AuditQuerySchema>;
+
 export const UserQuerySchema = z.object({
   search:   z.string().optional(),
   roleId:   z.string().optional(),

@@ -1,0 +1,173 @@
+Dev Log — 2026-04-16 (Session B)
+Session: Railway Deployment — Login Fix & Database Setup
+=============================================================
+
+CONTEXT
+-------
+Continuation of Railway deployment session. The API and Web services
+were deployed and online, but login was non-functional. User could see
+the login page but could not authenticate. This session diagnosed and
+fixed three separate issues blocking login.
+
+=============================================================
+ISSUE 1 — Empty Database (Root Cause of 401)
+=============================================================
+
+SYMPTOM
+  POST /api/auth/login returned 401 "Invalid credentials"
+
+DIAGNOSIS
+  The _prisma_migrations table existed (from a previous partial deploy)
+  but no application tables were created. The User table did not exist.
+  `prisma migrate deploy` reported "No pending migrations to apply"
+  because the migration record was present, but the actual SQL had
+  never executed.
+
+FIX
+  1. Dropped the stale _prisma_migrations table
+  2. Ran `prisma db push --force-reset --accept-data-loss` against
+     Railway PostgreSQL (nozomi.proxy.rlwy.net:25090)
+  3. Ran seed.ts locally targeting the Railway DB
+
+  Result: 14 roles, 262 permissions, 514 role-permission links,
+  admin user (see@pekatgroup.com), 13 test users seeded.
+
+=============================================================
+ISSUE 2 — Cross-Domain Cookie Invisible to Middleware
+=============================================================
+
+SYMPTOM
+  Login API returned 200 with valid JWT. But the page stayed on
+  /login — no redirect to /dashboard.
+
+DIAGNOSIS
+  The full login flow:
+    1. Browser on web-production-d3322.up.railway.app POSTs to
+       api-production-87a9.up.railway.app/api/auth/login
+    2. API sets session cookie on the API domain
+    3. LoginForm calls router.push("/dashboard")
+    4. Next.js middleware checks request.cookies.get("session")
+    5. Cookie was set on API domain, NOT web domain
+    6. Middleware finds no cookie → redirects back to /login
+
+  The cookie was invisible to the middleware because the API and Web
+  are on different Railway subdomains.
+
+FIX
+  Added Next.js rewrites to proxy /api/* through the web server:
+
+  FILE: apps/web/next.config.mjs
+    Added async rewrites() → proxies /api/:path* to INTERNAL_API_URL
+
+  FILE: apps/web/src/lib/api-client.ts
+    Browser requests now use "/api" (same-origin, proxied) instead of
+    the full API URL. Server-side requests still use the full URL.
+
+  ENV: Set INTERNAL_API_URL=https://api-production-87a9.up.railway.app
+       on the Web service via Railway API.
+
+  Result: Cookie is now set on the web domain. Middleware can read it.
+
+=============================================================
+ISSUE 3 — SameSite=Lax Blocking Cross-Origin Cookies
+=============================================================
+
+SYMPTOM
+  Even with the cookie set, SameSite=Lax blocks cookies on cross-
+  origin AJAX POST requests from different origins.
+
+FIX
+  FILE: apps/api/src/modules/auth/auth.controller.ts
+
+  Login cookie:
+    sameSite: "lax"  →  isProduction ? "none" : "lax"
+
+  Logout clearCookie:
+    Added matching secure + sameSite options so browser correctly
+    removes the cookie on logout.
+
+  Note: The proxy fix (Issue 2) makes this less critical since
+  requests are now same-origin, but this is still correct for any
+  direct API access.
+
+=============================================================
+ISSUE 4 — Redis Service Offline
+=============================================================
+
+STATUS: Not fixed via API. Image-based Railway services require
+first deployment via the Railway dashboard UI. User instructed to
+click "Deploy the image redis:7-alpine" on the dashboard.
+
+Not blocking core CRM functionality (Redis is used for BullMQ
+background jobs only).
+
+=============================================================
+ISSUE 5 — Auto-Deploy Not Triggering on Git Push
+=============================================================
+
+SYMPTOM
+  git push to GitHub did not trigger new Railway deployments.
+  serviceInstanceRedeploy reused the cached Docker image from the
+  previous build (old commit).
+
+FIX
+  Used serviceConnect mutation to reconnect the service to the repo,
+  which triggers a fresh build from the latest commit. Had to do this
+  for both API and Web services after each push.
+
+=============================================================
+FILES MODIFIED
+=============================================================
+
+  MODIFIED
+    apps/api/src/modules/auth/auth.controller.ts
+      - sameSite: "none" in production for login cookie
+      - Matching options on clearCookie for logout
+
+    apps/web/next.config.mjs
+      - Added rewrites() to proxy /api/* to NestJS API
+
+    apps/web/src/lib/api-client.ts
+      - Browser uses "/api" (same-origin proxy) instead of full URL
+
+=============================================================
+VERIFICATION
+=============================================================
+
+  End-to-end test via Node.js HTTPS:
+    1. POST /api/auth/login through web proxy → 200 OK
+    2. Cookie: SameSite=None; Secure; HttpOnly ✓
+    3. GET /api/auth/me with session cookie → 200 OK
+    4. User: see@pekatgroup.com, Role: SUPER_ADMIN ✓
+    5. User confirmed login works in browser ✓
+
+=============================================================
+DEPLOYMENT STATUS
+=============================================================
+
+  Service     | Status  | Commit  | Notes
+  ------------+---------+---------+---------------------------
+  PostgreSQL  | Online  | n/a     | Volume-backed, seeded
+  Redis       | Offline | n/a     | Needs UI deploy click
+  API         | Online  | 1be00b2 | Webpack bundle, cookie fix
+  Web         | Online  | 1be00b2 | Standalone, proxy rewrite
+
+  URLs:
+    Web:  https://web-production-d3322.up.railway.app
+    API:  https://api-production-87a9.up.railway.app
+
+=============================================================
+PENDING
+=============================================================
+
+  - Redis: click "Deploy the image redis:7-alpine" on Railway dashboard
+  - Dockerfile.api CMD seed: tsx not available in runner image
+    (seed was run manually from local machine)
+  - Auto-deploy webhook may need reconfiguration on Railway
+  - Railway API token should be rotated after deployment stabilises
+  - Carried from previous sessions:
+      - Scope enforcement fixes (other roles)
+      - Sensitive field stripping fixes (other roles)
+      - docs/v1-scope-and-data-control.md
+      - Notifications bell — currently decorative
+      - Dashboard widgets with real data

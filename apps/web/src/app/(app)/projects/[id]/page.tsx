@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { get, patch } from "@/lib/api-client";
 import { CheckCircle2, Circle, Clock, XCircle, ChevronRight, AlertCircle, Flag, X } from "lucide-react";
 import { LinkedDocsSection } from "@/components/documents/linked-docs-section";
+import { AuditTrail } from "@/components/audit/audit-trail";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -61,6 +62,7 @@ type ProjectDetail = {
   site: { id: string; name: string; address: string | null };
   projectManager: { id: string; name: string; email: string };
   opportunity: { id: string; title: string; stage: string };
+  contract: { id: string; contractNo: string; title: string; status: string; handoverStatus: string } | null;
   gates: Gate[];
   _count: { issues: number; risks: number; milestones: number; variations: number; punchlistItems: number };
 };
@@ -489,11 +491,13 @@ function GateActionModal({
 
 function GatePanel({
   gate,
+  projectId,
   isCurrent,
   onDeliverableChange,
   onAdvanceGate,
 }: {
   gate: Gate;
+  projectId: string;
   isCurrent: boolean;
   onDeliverableChange: (gateNo: number, deliverableId: string, status: DeliverableStatus) => void;
   onAdvanceGate: (gateNo: number, newStatus: string, remarks: string) => void;
@@ -636,6 +640,15 @@ function GatePanel({
               )}
             </div>
           )}
+
+          {/* Per-gate audit trail (silent if user lacks audit_log:view) */}
+          <div className="px-4 py-3 border-t">
+            <AuditTrail
+              resource="project_gate"
+              resourceId={`${projectId}:${gate.gateNo}`}
+              pageSize={5}
+            />
+          </div>
         </div>
       )}
     </div>
@@ -740,7 +753,7 @@ export default function ProjectDetailPage() {
             <RagBadge status={project.ragStatus} />
           </div>
           <h1 className="text-2xl font-semibold mt-1">{project.name}</h1>
-          <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-2 mt-1 text-sm text-muted-foreground">
             <Link href={`/accounts/${project.account.id}`} className="hover:text-primary hover:underline">
               {project.account.name}
             </Link>
@@ -750,6 +763,18 @@ export default function ProjectDetailPage() {
             <Link href={`/opportunities/${project.opportunity.id}`} className="hover:text-primary hover:underline">
               {project.opportunity.title}
             </Link>
+            {project.contract && (
+              <>
+                <span>·</span>
+                <Link
+                  href={`/contracts/${project.contract.id}`}
+                  className="inline-flex items-center gap-1 rounded-full bg-blue-50 dark:bg-blue-950/30 px-2 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-100"
+                  title={`${project.contract.title} — ${project.contract.status} · Handover ${project.contract.handoverStatus}`}
+                >
+                  Contract: {project.contract.contractNo}
+                </Link>
+              </>
+            )}
           </div>
         </div>
         <Link
@@ -798,6 +823,7 @@ export default function ProjectDetailPage() {
                 <GatePanel
                   key={gate.id}
                   gate={gate}
+                  projectId={project.id}
                   isCurrent={gate.gateNo === project.currentGateNo}
                   onDeliverableChange={handleDeliverableChange}
                   onAdvanceGate={(gateNo, newStatus, remarks) => handleGateAdvance(gateNo, newStatus, remarks)}

@@ -271,6 +271,8 @@ export class ReportingService {
       pendingProposalVersions,
       totalActive,
       ragCounts,
+      activeContracts,
+      recentAudit,
     ] = await Promise.all([
       // Distribution of active projects across gates 1-6
       this.prisma.project.groupBy({
@@ -445,6 +447,34 @@ export class ReportingService {
         where: { status: 'ACTIVE' },
         _count: { id: true },
       }),
+
+      // Contract variance — sum across active commercial work
+      this.prisma.contract.findMany({
+        where: { status: { in: ['AWARDED', 'SIGNED', 'ACTIVE'] } },
+        select: {
+          id: true,
+          contractNo: true,
+          title: true,
+          contractValue: true,
+          currency: true,
+          handoverStatus: true,
+          invoices: { select: { totalAmount: true, paidAmount: true, status: true } },
+        },
+      }),
+
+      // Recent audit activity — last 15 cross-resource events
+      this.prisma.auditLog.findMany({
+        orderBy: { performedAt: 'desc' },
+        take: 15,
+        select: {
+          id: true,
+          resource: true,
+          resourceId: true,
+          action: true,
+          performedAt: true,
+          user: { select: { id: true, name: true } },
+        },
+      }),
     ]);
 
     // Build gate distribution array (fill gaps with 0)
@@ -458,6 +488,34 @@ export class ReportingService {
     for (const row of ragCounts) {
       ragBreakdown[row.ragStatus as keyof typeof ragBreakdown] = row._count.id;
     }
+
+    // Contract variance summary across active commercial work.
+    // Currency is mixed in principle; we report per-currency rolls + an item-count fallback.
+    const handoverBuckets = { NOT_STARTED: 0, READY: 0, IN_PROGRESS: 0, COMPLETED: 0 };
+    const byCurrency: Record<string, { contracted: number; invoiced: number; paid: number; count: number }> = {};
+    for (const c of activeContracts) {
+      handoverBuckets[c.handoverStatus as keyof typeof handoverBuckets]++;
+      const ccy = c.currency;
+      if (!byCurrency[ccy]) byCurrency[ccy] = { contracted: 0, invoiced: 0, paid: 0, count: 0 };
+      byCurrency[ccy].contracted += Number(c.contractValue);
+      byCurrency[ccy].count++;
+      for (const inv of c.invoices) {
+        byCurrency[ccy].invoiced += Number(inv.totalAmount);
+        if (inv.status === 'PAID') byCurrency[ccy].paid += Number(inv.totalAmount);
+        else if (inv.paidAmount)   byCurrency[ccy].paid += Number(inv.paidAmount);
+      }
+    }
+    const contractVariance = {
+      activeCount: activeContracts.length,
+      handoverBuckets,
+      byCurrency: Object.entries(byCurrency).map(([currency, v]) => ({
+        currency,
+        ...v,
+        outstanding: Math.max(0, v.contracted - v.paid),
+        invoicedPercent: v.contracted > 0 ? Math.round((v.invoiced / v.contracted) * 1000) / 10 : 0,
+        paidPercent:     v.contracted > 0 ? Math.round((v.paid     / v.contracted) * 1000) / 10 : 0,
+      })),
+    };
 
     return {
       quickCounts: {
@@ -478,6 +536,11 @@ export class ReportingService {
       overdueMilestones,
       stalledProjects,
       criticalOpenIssues,
+      contractVariance,
+      recentAudit: recentAudit.map((a) => ({
+        ...a,
+        performedAt: a.performedAt.toISOString(),
+      })),
       generatedAt: now.toISOString(),
     };
   }

@@ -129,6 +129,7 @@ model Site {
   opportunities        Opportunity[]
   siteSurveys          SiteSurvey[]
   projects             Project[]
+  contracts            Contract[]
   assets               Asset[]
 
   @@map("sites")
@@ -185,6 +186,7 @@ model Opportunity {
   solutionOptions     SolutionOption[]
   proposals           Proposal[]
   project             Project?
+  contracts           Contract[]
   activities          Activity[]
   documents           Document[]
   members             OpportunityMember[]

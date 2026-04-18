@@ -72,4 +72,14 @@ export class AuthController {
   ) {
     return this.authService.changePassword(user.id, body.currentPassword, body.newPassword);
   }
+
+  // PATCH /api/auth/me/preferences — self-serve user preferences
+  @Patch("me/preferences")
+  @HttpCode(HttpStatus.OK)
+  async updatePreferences(
+    @CurrentUser() user: UserContext,
+    @Body() body: { notificationDigestEnabled?: boolean },
+  ) {
+    return this.authService.updatePreferences(user.id, body);
+  }
 }

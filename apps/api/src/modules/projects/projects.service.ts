@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
 import { AuthzService } from '../../common/authz/authz.service';
+import { AuditService } from '../../common/audit/audit.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UserContext, PaginatedResult } from '@solaroo/types';
 import { Prisma } from '@solaroo/db';
@@ -17,6 +18,7 @@ import {
   ProjectQueryDto,
   UpdateGateStatusDto,
   UpdateDeliverableDto,
+  AddProjectMemberDto,
 } from './projects.dto';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -46,6 +48,7 @@ export class ProjectsService {
     private readonly prisma: PrismaService,
     private readonly authz: AuthzService,
     private readonly notifications: NotificationsService,
+    private readonly audit: AuditService,
   ) {}
 
   // ─── List ──────────────────────────────────────────────────────────────────
@@ -139,6 +142,7 @@ export class ProjectsService {
         site: { select: { id: true, name: true, address: true } },
         projectManager: { select: { id: true, name: true, email: true } },
         opportunity: { select: { id: true, title: true, stage: true } },
+        contract: { select: { id: true, contractNo: true, title: true, status: true, handoverStatus: true } },
         blockerOwner: { select: { id: true, name: true } },
         gates: {
           orderBy: { gateNo: 'asc' },
@@ -272,6 +276,12 @@ export class ProjectsService {
       }
     }
 
+    // Capture pre-update blocker state to detect owner changes
+    const before = await this.prisma.project.findUnique({
+      where: { id },
+      select: { blockerOwnerId: true, currentBlocker: true },
+    });
+
     await this.prisma.project.update({
       where: { id },
       data: {
@@ -281,7 +291,64 @@ export class ProjectsService {
       },
     });
 
+    // Notification + audit — blocker owner assigned (or changed to a new user)
+    if (
+      dto.blockerOwnerId !== undefined &&
+      dto.blockerOwnerId !== null &&
+      dto.blockerOwnerId !== before?.blockerOwnerId
+    ) {
+      this.audit.record({
+        actor: user,
+        resource: 'project',
+        resourceId: id,
+        action: 'blocker_owner_assigned',
+        field: 'blockerOwnerId',
+        oldValue: before?.blockerOwnerId ?? null,
+        newValue: dto.blockerOwnerId,
+        metadata: {
+          blocker: dto.currentBlocker ?? before?.currentBlocker ?? null,
+          dueDate: dto.blockerDueDate ? String(dto.blockerDueDate) : null,
+        },
+      }).catch(() => {});
+
+      this.sendBlockerAssignedNotification(
+        id,
+        dto.blockerOwnerId,
+        dto.currentBlocker ?? before?.currentBlocker ?? null,
+        dto.blockerDueDate ?? null,
+        user,
+      ).catch(() => {});
+    }
+
     return this.findById(id, user);
+  }
+
+  // ─── Blocker assignment notification ──────────────────────────────────────
+
+  private async sendBlockerAssignedNotification(
+    projectId: string,
+    newOwnerId: string,
+    blocker: string | null,
+    dueDate: Date | null,
+    actor: UserContext,
+  ): Promise<void> {
+    if (newOwnerId === actor.id) return; // no self-notify
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { projectCode: true, name: true },
+    });
+    if (!project) return;
+    const dueText = dueDate ? ` — due ${new Date(dueDate).toISOString().slice(0, 10)}` : '';
+    const blockerText = blocker?.trim() || '(no description)';
+    await this.notifications.create({
+      userId: newOwnerId,
+      title: `You've been assigned a blocker on ${project.projectCode}`,
+      body: `${project.name} · ${blockerText}${dueText}`,
+      type: 'blocker_assigned',
+      linkUrl: `/projects/${projectId}`,
+      resource: 'project',
+      resourceId: projectId,
+    });
   }
 
   // ─── Gate status update ────────────────────────────────────────────────────
@@ -355,8 +422,24 @@ export class ProjectsService {
       ]);
     }
 
-    // ── Notifications ────────────────────────────────────────────────────────
-    // Fire-and-forget: don't let notification failures break the gate update
+    // ── Audit + Notifications ────────────────────────────────────────────────
+    // Fire-and-forget: don't let trail/notification failures break the gate update
+    this.audit.record({
+      actor: user,
+      resource: 'project_gate',
+      resourceId: `${projectId}:${gateNo}`,
+      action: 'status_changed',
+      field: 'status',
+      oldValue: gate.status,
+      newValue: dto.status,
+      metadata: {
+        projectId,
+        gateNo,
+        gateName: gate.gateName,
+        ...(dto.remarks && { remarks: dto.remarks }),
+      },
+    }).catch(() => {});
+
     this.sendGateNotifications(projectId, gateNo, gate.gateName, dto.status, user).catch(() => {});
 
     return this.findById(projectId, user);
@@ -484,7 +567,200 @@ export class ProjectsService {
       },
     });
 
+    // Audit + notification (status change)
+    this.audit.record({
+      actor: user,
+      resource: 'gate_deliverable',
+      resourceId: deliverableId,
+      action: 'status_changed',
+      field: 'status',
+      oldValue: deliverable.status,
+      newValue: dto.status,
+      metadata: {
+        projectId,
+        gateId: deliverable.gateId,
+        code: deliverable.code,
+        name: deliverable.name,
+      },
+    }).catch(() => {});
+
+    if (dto.status === 'APPROVED') {
+      this.sendDeliverableApprovedNotification(
+        projectId,
+        deliverable.code,
+        deliverable.name,
+        user,
+      ).catch(() => {});
+    }
+
     return this.findById(projectId, user);
+  }
+
+  // ─── Deliverable approval notification ────────────────────────────────────
+
+  private async sendDeliverableApprovedNotification(
+    projectId: string,
+    code: string,
+    name: string,
+    actor: UserContext,
+  ): Promise<void> {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: {
+        projectCode: true,
+        name: true,
+        projectManagerId: true,
+        members: { select: { userId: true } },
+      },
+    });
+    if (!project) return;
+    const recipientIds = [
+      ...new Set([
+        project.projectManagerId,
+        ...project.members.map((m) => m.userId),
+      ].filter((id) => id !== actor.id)),
+    ];
+    if (recipientIds.length === 0) return;
+    await this.notifications.createMany(
+      recipientIds.map((userId) => ({
+        userId,
+        title: `Deliverable approved: ${code} — ${project.projectCode}`,
+        body: `${project.name} · ${name} has been approved.`,
+        type: 'deliverable_approved',
+        linkUrl: `/projects/${projectId}`,
+        resource: 'gate_deliverable',
+        resourceId: projectId,
+      })),
+    );
+  }
+
+  // ─── Project members ──────────────────────────────────────────────────────
+
+  async addMember(
+    projectId: string,
+    dto: AddProjectMemberDto,
+    user: UserContext,
+  ) {
+    // Verify project exists and caller can see it (also enforces scope)
+    const project = await this.findById(projectId, user);
+    await this.authz.requirePermission(user, 'project', 'manage_members', {
+      ownerId: project.projectManagerId,
+      projectId,
+    });
+
+    // Verify the target user exists and is active
+    const target = await this.prisma.user.findUnique({
+      where: { id: dto.userId },
+      select: { id: true, isActive: true, name: true },
+    });
+    if (!target || !target.isActive) {
+      throw new NotFoundException('User not found or inactive');
+    }
+
+    // Idempotent — upsert on the composite key
+    await this.prisma.projectMember.upsert({
+      where: { projectId_userId: { projectId, userId: dto.userId } },
+      create: { projectId, userId: dto.userId, memberRole: dto.memberRole },
+      update: { memberRole: dto.memberRole },
+    });
+
+    // Audit + notification
+    this.audit.record({
+      actor: user,
+      resource: 'project',
+      resourceId: projectId,
+      action: 'member_added',
+      metadata: { userId: dto.userId, memberRole: dto.memberRole, name: target.name },
+    }).catch(() => {});
+
+    this.sendMemberAddedNotification(projectId, dto.userId, dto.memberRole, user).catch(() => {});
+
+    return this.findById(projectId, user);
+  }
+
+  async removeMember(
+    projectId: string,
+    userId: string,
+    user: UserContext,
+  ) {
+    const project = await this.findById(projectId, user);
+    await this.authz.requirePermission(user, 'project', 'manage_members', {
+      ownerId: project.projectManagerId,
+      projectId,
+    });
+
+    await this.prisma.projectMember.deleteMany({
+      where: { projectId, userId },
+    });
+
+    this.audit.record({
+      actor: user,
+      resource: 'project',
+      resourceId: projectId,
+      action: 'member_removed',
+      metadata: { userId },
+    }).catch(() => {});
+
+    return this.findById(projectId, user);
+  }
+
+  // ─── Project member added notification ────────────────────────────────────
+
+  private async sendMemberAddedNotification(
+    projectId: string,
+    newMemberId: string,
+    memberRole: string,
+    actor: UserContext,
+  ): Promise<void> {
+    const project = await this.prisma.project.findUnique({
+      where: { id: projectId },
+      select: { projectCode: true, name: true, projectManagerId: true },
+    });
+    if (!project) return;
+
+    const linkUrl = `/projects/${projectId}`;
+    const payloads: {
+      userId: string;
+      title: string;
+      body?: string;
+      type: string;
+      linkUrl?: string;
+      resource?: string;
+      resourceId?: string;
+    }[] = [];
+
+    // Welcome the new member (skip if they added themselves)
+    if (newMemberId !== actor.id) {
+      payloads.push({
+        userId: newMemberId,
+        title: `You've been added to ${project.projectCode}`,
+        body: `${project.name} — your role: ${memberRole}`,
+        type: 'project_member_added',
+        linkUrl,
+        resource: 'project',
+        resourceId: projectId,
+      });
+    }
+
+    // Inform the PM (skip if PM is the actor or the new member)
+    if (
+      project.projectManagerId !== actor.id &&
+      project.projectManagerId !== newMemberId
+    ) {
+      payloads.push({
+        userId: project.projectManagerId,
+        title: `Member added to ${project.projectCode}`,
+        body: `${project.name} — a new member was added with role ${memberRole}.`,
+        type: 'project_member_added',
+        linkUrl,
+        resource: 'project',
+        resourceId: projectId,
+      });
+    }
+
+    if (payloads.length > 0) {
+      await this.notifications.createMany(payloads);
+    }
   }
 
   // ─── Project summary by number ─────────────────────────────────────────────

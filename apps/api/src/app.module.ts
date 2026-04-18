@@ -5,6 +5,7 @@ import { ThrottlerModule } from "@nestjs/throttler";
 import { resolve } from "node:path";
 import { DatabaseModule } from "./common/database/database.module";
 import { AuthzModule } from "./common/authz/authz.module";
+import { AuditModule } from "./common/audit/audit.module";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { PermissionGuard } from "./common/authz/permission.guard";
 import { AuthModule } from "./modules/auth/auth.module";
@@ -25,6 +26,7 @@ import { AiModule } from "./modules/ai/ai.module";
 import { AdminModule } from "./modules/admin/admin.module";
 import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { SearchModule } from "./modules/search/search.module";
+import { SavedViewsModule } from "./modules/saved-views/saved-views.module";
 
 @Module({
   imports: [
@@ -58,6 +60,9 @@ import { SearchModule } from "./modules/search/search.module";
     // Authorization — global, provides AuthzService to all modules
     AuthzModule,
 
+    // Audit — global, provides AuditService to all modules
+    AuditModule,
+
     // Domain modules
     AuthModule,
     AccountsModule,
@@ -77,6 +82,7 @@ import { SearchModule } from "./modules/search/search.module";
     AdminModule,
     NotificationsModule,
     SearchModule,
+    SavedViewsModule,
   ],
   providers: [
     // JWT auth — runs first; rejects unauthenticated requests (except @Public routes)

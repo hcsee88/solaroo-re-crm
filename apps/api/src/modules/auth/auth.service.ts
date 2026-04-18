@@ -69,12 +69,30 @@ export class AuthService {
             displayName: true,
           },
         },
+        notificationDigestEnabled: true,
+        lastDigestSentAt: true,
         createdAt: true,
       },
     });
 
     if (!user) throw new NotFoundException("User not found");
     return user;
+  }
+
+  async updatePreferences(
+    userId: string,
+    prefs: { notificationDigestEnabled?: boolean },
+  ): Promise<{ ok: boolean; notificationDigestEnabled: boolean }> {
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(prefs.notificationDigestEnabled !== undefined && {
+          notificationDigestEnabled: prefs.notificationDigestEnabled,
+        }),
+      },
+      select: { notificationDigestEnabled: true },
+    });
+    return { ok: true, notificationDigestEnabled: updated.notificationDigestEnabled };
   }
 
   async changePassword(

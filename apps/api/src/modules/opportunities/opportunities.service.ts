@@ -23,6 +23,8 @@ import {
   OPPORTUNITY_STAGE_TRANSITIONS,
 } from '@solaroo/workflows';
 import { ProjectsService } from '../projects/projects.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { AuditService } from '../../common/audit/audit.service';
 
 // ─── Shared select shape ──────────────────────────────────────────────────────
 
@@ -108,6 +110,8 @@ export class OpportunitiesService {
     private readonly authz: AuthzService,
     @Inject(forwardRef(() => ProjectsService))
     private readonly projectsService: ProjectsService,
+    private readonly notifications: NotificationsService,
+    private readonly audit: AuditService,
   ) {}
 
   // ─── List ──────────────────────────────────────────────────────────────────
@@ -373,8 +377,9 @@ export class OpportunitiesService {
     const result = { ...(opp as unknown as OpportunityRecord), stageHistory: opp.stageHistory, allowedNextStages };
 
     // Auto-create project when marked WON
+    let newProjectId: string | undefined;
     if (dto.toStage === 'WON' && dto.projectCode && dto.projectManagerId && dto.projectName) {
-      await this.projectsService.create(
+      const project = await this.projectsService.create(
         {
           projectCode:      dto.projectCode,
           name:             dto.projectName,
@@ -388,9 +393,110 @@ export class OpportunitiesService {
         },
         user,
       );
+      newProjectId = project?.id;
     }
 
+    // Audit + notifications — fire-and-forget so failures don't break the transition
+    this.audit.record({
+      actor: user,
+      resource: 'opportunity',
+      resourceId: id,
+      action: 'stage_changed',
+      field: 'stage',
+      oldValue: current.stage,
+      newValue: dto.toStage,
+      metadata: {
+        ...(dto.reason && { reason: dto.reason }),
+        ...(newProjectId && { projectCreated: newProjectId }),
+      },
+    }).catch(() => {});
+
+    this.sendStageNotifications(
+      result,
+      current.stage,
+      dto.toStage as OpportunityStage,
+      dto,
+      user,
+      newProjectId,
+    ).catch(() => {});
+
     return result;
+  }
+
+  // ─── Stage transition notifications ──────────────────────────────────────
+
+  private async sendStageNotifications(
+    opp: OpportunityRecord,
+    fromStage: OpportunityStage,
+    toStage: OpportunityStage,
+    dto: TransitionStageDto,
+    actor: UserContext,
+    newProjectId: string | undefined,
+  ): Promise<void> {
+    const oppLink = `/opportunities/${opp.id}`;
+    const projectLink = newProjectId ? `/projects/${newProjectId}` : oppLink;
+
+    if (toStage === 'WON') {
+      // Notify the new PM + all DIRECTOR + SALES_MANAGER users
+      const directorIds = await this.notifications.getUserIdsByRoles([
+        'DIRECTOR',
+        'SALES_MANAGER',
+      ]);
+      const recipients = new Set<string>(directorIds);
+      if (dto.projectManagerId) recipients.add(dto.projectManagerId);
+      recipients.delete(actor.id);
+      if (recipients.size === 0) return;
+      const valueText =
+        opp.estimatedValue != null ? ` · est. value ${String(opp.estimatedValue)}` : '';
+      await this.notifications.createMany(
+        Array.from(recipients).map((userId) => ({
+          userId,
+          title: `Opportunity won — ${opp.opportunityCode}`,
+          body: `${dto.projectName ?? opp.title}${valueText}`,
+          type: 'opp_won',
+          linkUrl: projectLink,
+          resource: 'opportunity',
+          resourceId: opp.id,
+        })),
+      );
+      return;
+    }
+
+    if (toStage === 'LOST') {
+      const managerIds = await this.notifications.getUserIdsByRoles([
+        'SALES_MANAGER',
+        'DIRECTOR',
+      ]);
+      const recipients = new Set<string>(managerIds);
+      recipients.add(opp.ownerUserId);
+      recipients.delete(actor.id);
+      if (recipients.size === 0) return;
+      const reasonText = dto.reason ? ` Reason: ${dto.reason}` : '';
+      await this.notifications.createMany(
+        Array.from(recipients).map((userId) => ({
+          userId,
+          title: `Opportunity lost — ${opp.opportunityCode}`,
+          body: `${opp.title}.${reasonText}`,
+          type: 'opp_lost',
+          linkUrl: oppLink,
+          resource: 'opportunity',
+          resourceId: opp.id,
+        })),
+      );
+      return;
+    }
+
+    // Other transitions — notify the opportunity owner only (skip if owner == actor)
+    if (opp.ownerUserId === actor.id) return;
+    await this.notifications.create({
+      userId: opp.ownerUserId,
+      title: `Opportunity moved to ${toStage} — ${opp.opportunityCode}`,
+      body: `${opp.title} · ${fromStage} → ${toStage}`,
+      type: 'opp_stage_changed',
+      linkUrl: oppLink,
+      resource: 'opportunity',
+      resourceId: opp.id,
+    });
   }
 
   // ─── Code generator ────────────────────────────────────────────────────────

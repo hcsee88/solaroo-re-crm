@@ -122,6 +122,7 @@ model ProposalVersion {
   assumptions         ProposalAssumptionSet?
   approvals           ProposalApproval[]
   documents           Document[]
+  contracts           Contract[]
 
   @@unique([proposalId, versionNo])
   @@map("proposal_versions")

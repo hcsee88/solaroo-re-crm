@@ -5,9 +5,17 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
 import { AuthzService } from '../../common/authz/authz.service';
+import { AuditService } from '../../common/audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { UserContext, PaginatedResult } from '@solaroo/types';
 import { Prisma } from '@solaroo/db';
-import { UploadDocumentDto, DocumentQueryDto, DOC_CATEGORIES } from './documents.dto';
+import {
+  UploadDocumentDto,
+  DocumentQueryDto,
+  DOC_CATEGORIES,
+  ApproveRevisionDto,
+  RejectRevisionDto,
+} from './documents.dto';
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
@@ -61,6 +69,8 @@ export class DocumentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly authz: AuthzService,
+    private readonly notifications: NotificationsService,
+    private readonly audit: AuditService,
   ) {
     this.uploadsDir = path.join(process.cwd(), 'uploads');
   }
@@ -122,7 +132,7 @@ export class DocumentsService {
     user: UserContext,
     query: DocumentQueryDto,
   ): Promise<PaginatedResult<DocumentListItem>> {
-    const { opportunityId, projectId, docType, status, search, sortBy, sortDir, page, pageSize } = query;
+    const { opportunityId, projectId, contractId, docType, status, search, sortBy, sortDir, page, pageSize } = query;
 
     // Scope enforcement: determine what records this user can see
     const scope = await this.authz.getBestScope(user, 'document', 'view');
@@ -156,6 +166,7 @@ export class DocumentsService {
       ...scopeFilter,
       ...(opportunityId && { opportunityId }),
       ...(projectId     && { projectId }),
+      ...(contractId    && { contractId }),
       ...(docType       && { docType }),
       ...(status        && { status: status as any }),
       ...(search && {
@@ -288,6 +299,19 @@ export class DocumentsService {
       docCode = `${project.projectCode}-DOC-${String(count + 1).padStart(3, '0')}`;
       createData = { projectId: dto.projectId, module: 'project' };
 
+    } else if (dto.contractId) {
+      // ── Contract-linked document (e.g. signed PDF) ───────────────────────
+      const contract = await this.prisma.contract.findUnique({
+        where:  { id: dto.contractId },
+        select: { contractNo: true },
+      });
+      if (!contract) throw new NotFoundException(`Contract ${dto.contractId} not found`);
+
+      relDir = path.join('contracts', dto.contractId, categorySlug);
+      const count = await this.prisma.document.count({ where: { contractId: dto.contractId } });
+      docCode = `${contract.contractNo}-DOC-${String(count + 1).padStart(3, '0')}`;
+      createData = { contractId: dto.contractId, module: 'contract' };
+
     } else {
       // ── Opportunity-linked document ──────────────────────────────────────
       relDir = path.join('opportunities', dto.opportunityId!, categorySlug);
@@ -391,5 +415,186 @@ export class DocumentsService {
     for (const slug of slugs) {
       await fs.mkdir(path.join(baseDir, slug), { recursive: true });
     }
+  }
+
+  // ── Approve a revision ────────────────────────────────────────────────────
+
+  async approveRevision(
+    documentId: string,
+    revisionId: string,
+    _dto: ApproveRevisionDto,
+    user: UserContext,
+  ): Promise<void> {
+    const revision = await this.prisma.documentRevision.findUnique({
+      where: { id: revisionId },
+      include: {
+        document: {
+          select: {
+            id: true,
+            title: true,
+            ownerUserId: true,
+            projectId: true,
+            opportunityId: true,
+          },
+        },
+      },
+    });
+    if (!revision || revision.documentId !== documentId) {
+      throw new NotFoundException('Revision not found');
+    }
+    await this.authz.requirePermission(user, 'document', 'approve', {
+      ownerId: revision.document.ownerUserId ?? undefined,
+      projectId: revision.document.projectId ?? undefined,
+      opportunityId: revision.document.opportunityId ?? undefined,
+    });
+    if (revision.approvalStatus === 'APPROVED') {
+      throw new BadRequestException('Revision is already approved');
+    }
+
+    await this.prisma.documentRevision.update({
+      where: { id: revisionId },
+      data: {
+        approvalStatus: 'APPROVED',
+        approvedByUserId: user.id,
+        approvedAt: new Date(),
+      },
+    });
+
+    this.audit.record({
+      actor: user,
+      resource: 'document_revision',
+      resourceId: revisionId,
+      action: 'approved',
+      field: 'approvalStatus',
+      oldValue: revision.approvalStatus,
+      newValue: 'APPROVED',
+      metadata: { documentId: revision.document.id, projectId: revision.document.projectId ?? null },
+    }).catch(() => {});
+
+    this.sendDocumentDecisionNotification(
+      revision.document,
+      revision.uploadedByUserId,
+      'APPROVED',
+      null,
+      user,
+    ).catch(() => {});
+  }
+
+  // ── Reject a revision ─────────────────────────────────────────────────────
+
+  async rejectRevision(
+    documentId: string,
+    revisionId: string,
+    dto: RejectRevisionDto,
+    user: UserContext,
+  ): Promise<void> {
+    const revision = await this.prisma.documentRevision.findUnique({
+      where: { id: revisionId },
+      include: {
+        document: {
+          select: {
+            id: true,
+            title: true,
+            ownerUserId: true,
+            projectId: true,
+            opportunityId: true,
+          },
+        },
+      },
+    });
+    if (!revision || revision.documentId !== documentId) {
+      throw new NotFoundException('Revision not found');
+    }
+    await this.authz.requirePermission(user, 'document', 'approve', {
+      ownerId: revision.document.ownerUserId ?? undefined,
+      projectId: revision.document.projectId ?? undefined,
+      opportunityId: revision.document.opportunityId ?? undefined,
+    });
+    if (revision.approvalStatus === 'REJECTED') {
+      throw new BadRequestException('Revision is already rejected');
+    }
+
+    await this.prisma.documentRevision.update({
+      where: { id: revisionId },
+      data: {
+        approvalStatus: 'REJECTED',
+        approvedByUserId: user.id,
+        approvedAt: new Date(),
+      },
+    });
+
+    this.audit.record({
+      actor: user,
+      resource: 'document_revision',
+      resourceId: revisionId,
+      action: 'rejected',
+      field: 'approvalStatus',
+      oldValue: revision.approvalStatus,
+      newValue: 'REJECTED',
+      metadata: { documentId: revision.document.id, reason: dto.reason },
+    }).catch(() => {});
+
+    this.sendDocumentDecisionNotification(
+      revision.document,
+      revision.uploadedByUserId,
+      'REJECTED',
+      dto.reason,
+      user,
+    ).catch(() => {});
+  }
+
+  // ── Notification dispatcher for document approve/reject ──────────────────
+
+  private async sendDocumentDecisionNotification(
+    doc: {
+      id: string;
+      title: string;
+      ownerUserId: string | null;
+      projectId: string | null;
+      opportunityId: string | null;
+    },
+    uploaderId: string | null,
+    decision: 'APPROVED' | 'REJECTED',
+    reason: string | null,
+    actor: UserContext,
+  ): Promise<void> {
+    const recipients = new Set<string>();
+    if (uploaderId)      recipients.add(uploaderId);
+    if (doc.ownerUserId) recipients.add(doc.ownerUserId);
+
+    if (doc.projectId) {
+      const project = await this.prisma.project.findUnique({
+        where: { id: doc.projectId },
+        select: { projectManagerId: true },
+      });
+      if (project) recipients.add(project.projectManagerId);
+    }
+
+    recipients.delete(actor.id);
+    if (recipients.size === 0) return;
+
+    const linkUrl = doc.projectId
+      ? `/projects/${doc.projectId}`
+      : doc.opportunityId
+        ? `/opportunities/${doc.opportunityId}`
+        : '/documents';
+
+    const title = `Document ${decision}: ${doc.title}`;
+    const body =
+      decision === 'REJECTED'
+        ? `Reason: ${reason ?? '(none provided)'}`
+        : 'Your document revision has been approved.';
+
+    await this.notifications.createMany(
+      Array.from(recipients).map((userId) => ({
+        userId,
+        title,
+        body,
+        type: decision === 'APPROVED' ? 'document_approved' : 'document_rejected',
+        linkUrl,
+        resource: 'document',
+        resourceId: doc.id,
+      })),
+    );
   }
 }

@@ -4,6 +4,7 @@ import { Bell, X, Check, CheckCheck } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { get, patch } from "@/lib/api-client";
+import { getAccentColor, timeAgo } from "@/lib/notification-utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -21,30 +22,6 @@ type NotificationItem = {
   createdAt: string;
   readAt: string | null;
 };
-
-// ─── Per-type accent colour ───────────────────────────────────────────────────
-
-function getAccentColor(type: string): string {
-  if (type.startsWith("gate_submitted"))  return "#fdab3d"; // amber
-  if (type.startsWith("gate_approved"))   return "#00ca72"; // green
-  if (type.startsWith("gate_rejected"))   return "#e2445c"; // red
-  if (type.startsWith("proposal_submitted")) return "#0073ea"; // blue
-  if (type.startsWith("proposal_approved"))  return "#00ca72"; // green
-  if (type.startsWith("proposal_rejected"))  return "#e2445c"; // red
-  if (type.startsWith("proposal_"))          return "#a25ddc"; // purple
-  return "#676879"; // grey default
-}
-
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1)   return "just now";
-  if (mins < 60)  return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24)   return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
 
 // ─── Notification Bell ────────────────────────────────────────────────────────
 
