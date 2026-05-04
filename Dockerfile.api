@@ -53,5 +53,18 @@ WORKDIR /app/apps/api
 ENV NODE_ENV=production
 EXPOSE ${PORT:-4000}
 
-# Run migrations, seed if needed, then start API
-CMD ["sh", "-c", "cd /app && prisma migrate deploy --schema packages/db/prisma/schema || echo 'Migrations: skipped or none pending' && cd /app/packages/db && npx tsx src/seed.ts 2>&1 || echo 'Seed: skipped or already done' && cd /app/apps/api && node dist/main"]
+# Sync schema (additive only — refuses destructive changes without --accept-data-loss),
+# seed roles/users/permissions (idempotent upserts; never touches business data),
+# then start API.
+#
+# IMPORTANT — data safety:
+#   `prisma db push --skip-generate` (no --accept-data-loss flag) will:
+#     • Add new columns/tables/indexes silently         ✓
+#     • REFUSE and exit non-zero on any destructive     ✓
+#       change (column drop, type narrowing, etc.)
+#   Combined with the seed script (which only upserts roles/permissions/test
+#   users — see packages/db/src/seed.ts), business data (accounts, sites,
+#   contacts, opportunities, proposals, projects, …) CANNOT be wiped by a
+#   normal deploy. To intentionally apply a destructive change, an operator
+#   must run db push --accept-data-loss manually outside this container.
+CMD ["sh", "-c", "cd /app && prisma db push --schema packages/db/prisma/schema --skip-generate || { echo '[startup] Schema sync FAILED — likely a destructive change was blocked. Run prisma db push --accept-data-loss manually if intended. Container exiting to protect data.'; exit 1; } && cd /app/packages/db && npx tsx src/seed.ts || echo '[startup] Seed: skipped or non-fatal' && cd /app/apps/api && node dist/main"]
