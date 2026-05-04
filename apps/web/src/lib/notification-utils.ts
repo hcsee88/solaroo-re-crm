@@ -24,6 +24,9 @@ export function getAccentColor(type: string): string {
   if (type.startsWith("contract_handover_completed"))  return "#00ca72"; // green
   if (type.startsWith("invoice_paid"))                 return "#00ca72"; // green
   if (type.startsWith("digest"))                       return "#a25ddc"; // purple
+  if (type.startsWith("next_action_overdue"))          return "#a52840"; // red
+  if (type.startsWith("proposal_no_followup"))         return "#fdab3d"; // amber
+  if (type.startsWith("opportunity_stale"))            return "#fdab3d"; // amber
   return "#676879"; // grey default
 }
 

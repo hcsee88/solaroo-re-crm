@@ -16,11 +16,14 @@ const COMMERCIAL_MODELS = [
   "CAPEX_SALE", "LEASE", "PPA", "HYBRID_CAPEX_PPA", "EPC_ONLY", "DESIGN_AND_SUPPLY",
 ] as const;
 
-type UserOption = { id: string; name: string; email: string };
+type UserOption = { id: string; name: string; email: string; roleName: string };
+
+const DESIGN_ROLES = new Set(["DESIGN_ENGINEER", "DESIGN_LEAD"]);
 
 type FormState = {
   title: string;
   ownerUserId: string;
+  designEngineerId: string;
   commercialModel: string;
   estimatedValue: string;
   estimatedPvKwp: string;
@@ -41,7 +44,7 @@ export default function EditOpportunityPage() {
   const { id } = useParams<{ id: string }>();
 
   const [form, setForm] = useState<FormState>({
-    title: "", ownerUserId: "", commercialModel: "",
+    title: "", ownerUserId: "", designEngineerId: "", commercialModel: "",
     estimatedValue: "", estimatedPvKwp: "", estimatedBessKw: "", estimatedBessKwh: "",
     probabilityPercent: "", expectedAwardDate: "", summary: "", risks: "", competitors: "",
     nextAction: "", nextActionDueDate: "", lastStatusNote: "",
@@ -64,6 +67,7 @@ export default function EditOpportunityPage() {
         setForm({
           title: o.title,
           ownerUserId: o.ownerUserId,
+          designEngineerId: o.designEngineerId ?? "",
           commercialModel: o.commercialModel ?? "",
           estimatedValue: o.estimatedValue ?? "",
           estimatedPvKwp: o.estimatedPvKwp ?? "",
@@ -111,6 +115,7 @@ export default function EditOpportunityPage() {
       await patch(`/opportunities/${id}`, {
         title: form.title.trim(),
         ownerUserId: form.ownerUserId,
+        designEngineerId: form.designEngineerId || null,
         commercialModel: form.commercialModel || undefined,
         estimatedValue: form.estimatedValue ? parseFloat(form.estimatedValue) : undefined,
         estimatedPvKwp: form.estimatedPvKwp ? parseFloat(form.estimatedPvKwp) : undefined,
@@ -219,6 +224,19 @@ export default function EditOpportunityPage() {
                 {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
               {errors.ownerUserId && <p className="mt-1 text-xs text-destructive">{errors.ownerUserId}</p>}
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1.5">Design Engineer</label>
+              <select
+                value={form.designEngineerId}
+                onChange={(e) => set("designEngineerId", e.target.value)}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                <option value="">— Unassigned —</option>
+                {users
+                  .filter((u) => DESIGN_ROLES.has(u.roleName))
+                  .map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1.5">Commercial Model</label>

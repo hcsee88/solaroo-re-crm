@@ -10,11 +10,20 @@ const COMMERCIAL_MODELS = [
   'CAPEX_SALE', 'LEASE', 'PPA', 'HYBRID_CAPEX_PPA', 'EPC_ONLY', 'DESIGN_AND_SUPPLY',
 ] as const;
 
+const NEXT_ACTION_TYPES = [
+  'FOLLOW_UP', 'SITE_SURVEY', 'REVISED_QUOTATION', 'CLIENT_MEETING', 'INTERNAL_REVIEW', 'OTHER',
+] as const;
+
+const NEXT_ACTION_STATUSES = ['PENDING', 'COMPLETED'] as const;
+// Effective status (computed): adds OVERDUE = (PENDING && due in past)
+const NEXT_ACTION_EFFECTIVE_STATUSES = ['PENDING', 'COMPLETED', 'OVERDUE'] as const;
+
 export const CreateOpportunitySchema = z.object({
   title: z.string().min(1).max(255),
   accountId: z.string().cuid(),
   siteId: z.string().cuid(),
   ownerUserId: z.string().cuid(),
+  designEngineerId: z.string().cuid().nullable().optional(),
   commercialModel: z.enum(COMMERCIAL_MODELS).optional(),
   estimatedValue: z.number().positive().optional(),
   estimatedPvKwp: z.number().positive().optional(),
@@ -25,10 +34,12 @@ export const CreateOpportunitySchema = z.object({
   summary: z.string().optional(),
   risks: z.string().optional(),
   competitors: z.string().optional(),
-  // V1 tracking fields
-  nextAction:        z.string().max(500).optional(),
-  nextActionDueDate: z.string().datetime().optional(),
-  lastStatusNote:    z.string().max(1000).optional(),
+  // V1 tracking fields — nullable so the edit form can clear them
+  nextAction:        z.string().max(500).nullable().optional(),
+  nextActionDueDate: z.string().datetime().nullable().optional(),
+  nextActionType:    z.enum(NEXT_ACTION_TYPES).nullable().optional(),
+  nextActionOwnerId: z.string().cuid().nullable().optional(),
+  lastStatusNote:    z.string().max(1000).nullable().optional(),
 });
 
 export const UpdateOpportunitySchema = CreateOpportunitySchema.partial();
@@ -56,6 +67,7 @@ export const OpportunityQuerySchema = z.object({
   accountId: z.string().optional(),
   siteId: z.string().optional(),
   ownerUserId: z.string().optional(),
+  designEngineerId: z.string().optional(),
   stage: z.enum(STAGES).optional(),
   isActive: z
     .string()
@@ -65,11 +77,36 @@ export const OpportunityQuerySchema = z.object({
     .string()
     .optional()
     .transform((v) => v === 'true'),
+  // ── Sales pipeline V1 filter chips ─────────────────────────────────────
+  // All boolean-coerced flags. Combinable.
+  myOnly:                      z.coerce.boolean().optional(),  // ownerUserId = current user
+  mineAsDesignEngineer:        z.coerce.boolean().optional(),  // designEngineerId = current user
+  closingThisMonth:            z.coerce.boolean().optional(),  // expectedAwardDate within current month
+  closingThisQuarter:          z.coerce.boolean().optional(),  // expectedAwardDate within current quarter
+  noNextAction:                z.coerce.boolean().optional(),  // nextAction is null/empty
+  overdueNextAction:           z.coerce.boolean().optional(),  // nextActionStatus=PENDING && due<now
+  noActivity14d:               z.coerce.boolean().optional(),  // no activity within 14 days
+  noActivity30d:               z.coerce.boolean().optional(),  // no activity within 30 days
+  proposalSubmitted:           z.coerce.boolean().optional(),  // stage in {BUDGETARY_PROPOSAL, FIRM_PROPOSAL}
+  highValue:                   z.coerce.boolean().optional(),  // estimatedValue >= 1,000,000 (configurable later)
+  wonThisMonth:                z.coerce.boolean().optional(),  // stage=WON && updatedAt this month
+  lostThisMonth:               z.coerce.boolean().optional(),  // stage=LOST && updatedAt this month
+  nextActionStatus:            z.enum(NEXT_ACTION_EFFECTIVE_STATUSES).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(500).default(25),
   sortBy: z.enum(['title', 'opportunityCode', 'stage', 'estimatedValue', 'expectedAwardDate', 'nextActionDueDate', 'createdAt', 'updatedAt']).default('updatedAt'),
   sortDir: z.enum(['asc', 'desc']).default('desc'),
 });
+
+// Dedicated next-action update endpoint — finer permission than full opportunity edit
+export const UpdateNextActionSchema = z.object({
+  nextAction:        z.string().min(1).max(500).optional(),
+  nextActionType:    z.enum(NEXT_ACTION_TYPES).optional(),
+  nextActionDueDate: z.coerce.date().nullable().optional(),
+  nextActionOwnerId: z.string().cuid().nullable().optional(),
+  nextActionStatus:  z.enum(NEXT_ACTION_STATUSES).optional(),
+});
+export type UpdateNextActionDto = z.infer<typeof UpdateNextActionSchema>;
 
 export type CreateOpportunityDto = z.infer<typeof CreateOpportunitySchema>;
 export type UpdateOpportunityDto = z.infer<typeof UpdateOpportunitySchema>;

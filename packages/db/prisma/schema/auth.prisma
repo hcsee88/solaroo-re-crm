@@ -39,6 +39,11 @@ model User {
   contractsAsPmCandidate Contract[] @relation("ContractPMCandidate")
   contractsHandedOver    Contract[] @relation("ContractHandoverCompleter")
 
+  // Sales pipeline back-refs (V1 manual activity logging)
+  activitiesLogged       Activity[]    @relation("ActivityOwner")
+  nextActionsAssigned    Opportunity[] @relation("NextActionOwner")
+  opportunitiesAsDesignEng Opportunity[] @relation("OpportunityDesignEngineer")
+
   @@map("users")
 }
 

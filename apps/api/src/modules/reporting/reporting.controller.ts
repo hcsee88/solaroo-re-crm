@@ -22,4 +22,10 @@ export class ReportingController {
   getPmo(@CurrentUser() user: UserContext) {
     return this.reportingService.getPmoMetrics(user);
   }
+
+  @Get('sales-pipeline')
+  @RequirePermission('reporting', 'view')
+  getSalesPipeline(@CurrentUser() user: UserContext) {
+    return this.reportingService.getSalesPipelineMetrics(user);
+  }
 }

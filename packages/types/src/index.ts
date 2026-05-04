@@ -274,6 +274,13 @@ export type OpportunityStageHistory = {
   changedAt: string;
 };
 
+// V1 sales pipeline computed fields shared by list + detail
+export type OpportunityHealth = 'HEALTHY' | 'AT_RISK' | 'STALE' | 'OVERDUE';
+export type EffectiveNextActionStatus = 'PENDING' | 'COMPLETED' | 'OVERDUE' | 'NONE';
+export type NextActionTypeValue =
+  | 'FOLLOW_UP' | 'SITE_SURVEY' | 'REVISED_QUOTATION'
+  | 'CLIENT_MEETING' | 'INTERNAL_REVIEW' | 'OTHER';
+
 export type OpportunityListItem = {
   id: string;
   opportunityCode: string;
@@ -288,10 +295,20 @@ export type OpportunityListItem = {
   updatedAt: string;
   nextAction: string | null;
   nextActionDueDate: string | null;
+  // V1 structured next-action fields
+  nextActionType: NextActionTypeValue | null;
+  nextActionStatus: 'PENDING' | 'COMPLETED';
+  nextActionOwnerId: string | null;
+  // V1 computed fields
+  lastActivityAt: string | null;
+  health: OpportunityHealth;
+  effectiveNextActionStatus: EffectiveNextActionStatus;
   account: { id: string; accountCode: string; name: string };
   site: { id: string; siteCode: string; name: string; gridCategory: string };
   owner: { id: string; name: string; email: string };
-  _count: { proposals: number };
+  designEngineerId: string | null;
+  designEngineer: { id: string; name: string; email: string } | null;
+  _count: { proposals: number; activities?: number };
 };
 
 export type OpportunityDetail = OpportunityListItem & {
@@ -307,6 +324,7 @@ export type OpportunityDetail = OpportunityListItem & {
   ownerUserId: string;
   nextAction: string | null;
   nextActionDueDate: string | null;
+  nextActionCompletedAt: string | null;
   lastStatusNote: string | null;
   stageHistory: OpportunityStageHistory[];
   allowedNextStages: OpportunityStageValue[];

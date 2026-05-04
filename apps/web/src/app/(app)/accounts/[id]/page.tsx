@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { get, patch } from "@/lib/api-client";
 import type { AccountDetail, AccountType, ContactListItem, PaginatedResult } from "@solaroo/types";
 import { ACCOUNT_TYPE_LABELS, ACCOUNT_TYPE_COLOURS } from "@solaroo/types";
+import { ActivityTimeline } from "@/components/activities/activity-timeline";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -188,7 +189,7 @@ export default function AccountDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<
-    "overview" | "contacts" | "sites" | "opportunities"
+    "overview" | "contacts" | "sites" | "opportunities" | "activities"
   >("overview");
 
   useEffect(() => {
@@ -231,6 +232,7 @@ export default function AccountDetailPage() {
       key: "opportunities",
       label: `Opportunities (${account._count.opportunities})`,
     },
+    { key: "activities", label: "Activities" },
   ] as const;
 
   return (
@@ -385,6 +387,10 @@ export default function AccountDetailPage() {
             Opportunities module coming soon.
           </div>
         </div>
+      )}
+
+      {activeTab === "activities" && (
+        <ActivityTimeline accountId={id} />
       )}
     </div>
   );

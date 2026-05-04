@@ -131,6 +131,7 @@ model Site {
   projects             Project[]
   contracts            Contract[]
   assets               Asset[]
+  activities           Activity[]
 
   @@map("sites")
 }
@@ -167,8 +168,12 @@ model Opportunity {
   summary             String?
   lostReason          String?
   // ── V1 tracking fields ──────────────────────────────────────────────────
-  nextAction          String?          // What needs to happen next (free text)
+  nextAction          String?          // Free-text note / description of the next step
   nextActionDueDate   DateTime?        // When next action must be done by
+  nextActionType      NextActionType?  // Structured type (FOLLOW_UP, SITE_SURVEY, etc)
+  nextActionStatus    NextActionStatus @default(PENDING)
+  nextActionOwnerId   String?          // Defaults to opportunity owner if unset
+  nextActionCompletedAt DateTime?
   lastStatusNote      String?          // Latest brief status update from owner
   isActive            Boolean          @default(true)
   createdAt           DateTime         @default(now())
@@ -177,10 +182,13 @@ model Opportunity {
   accountId           String
   siteId              String
   ownerUserId         String
+  designEngineerId    String?          // Sales Engineer = owner; Design Engineer = this field
 
   account             Account          @relation(fields: [accountId], references: [id])
   site                Site             @relation(fields: [siteId], references: [id])
   owner               User             @relation("OpportunityOwner", fields: [ownerUserId], references: [id])
+  nextActionOwner     User?            @relation("NextActionOwner", fields: [nextActionOwnerId], references: [id])
+  designEngineer      User?            @relation("OpportunityDesignEngineer", fields: [designEngineerId], references: [id])
 
   stageHistory        OpportunityStageHistory[]
   solutionOptions     SolutionOption[]
@@ -213,10 +221,32 @@ model OpportunityStageHistory {
 enum ActivityType {
   CALL
   EMAIL
+  WHATSAPP
   MEETING
-  NOTE
   SITE_VISIT
+  PROPOSAL_FOLLOW_UP
+  GENERAL_NOTE
+  // Legacy values — kept for backwards compatibility with existing rows
+  NOTE
   TASK
+}
+
+// Structured next-action types on Opportunity (V1 sales pipeline discipline)
+enum NextActionType {
+  FOLLOW_UP
+  SITE_SURVEY
+  REVISED_QUOTATION
+  CLIENT_MEETING
+  INTERNAL_REVIEW
+  OTHER
+}
+
+// Stored next-action status. OVERDUE is computed at read time
+// (status===PENDING && nextActionDueDate < now) so UI is always fresh
+// without a worker reconciliation step.
+enum NextActionStatus {
+  PENDING
+  COMPLETED
 }
 
 model Activity {
@@ -227,13 +257,20 @@ model Activity {
   occurredAt    DateTime
   createdAt     DateTime     @default(now())
 
+  ownerUserId   String       // Who logged it / performed the touchpoint
   accountId     String?
   contactId     String?
+  siteId        String?
   opportunityId String?
 
+  owner         User         @relation("ActivityOwner", fields: [ownerUserId], references: [id])
   account       Account?     @relation(fields: [accountId], references: [id])
   contact       Contact?     @relation(fields: [contactId], references: [id])
+  site          Site?        @relation(fields: [siteId], references: [id])
   opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
 
+  @@index([opportunityId, occurredAt])
+  @@index([accountId, occurredAt])
+  @@index([ownerUserId, occurredAt])
   @@map("activities")
 }

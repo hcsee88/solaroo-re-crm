@@ -19,6 +19,7 @@ type FormState = {
   title: string;
   accountId: string;
   siteId: string;
+  designEngineerId: string;
   commercialModel: string;
   estimatedValue: string;
   estimatedPvKwp: string;
@@ -35,6 +36,7 @@ const INITIAL: FormState = {
   title: "",
   accountId: "",
   siteId: "",
+  designEngineerId: "",
   commercialModel: "",
   estimatedValue: "",
   estimatedPvKwp: "",
@@ -47,6 +49,9 @@ const INITIAL: FormState = {
   competitors: "",
 };
 
+// Roles eligible to be tagged as the Design Engineer on an opportunity
+const DESIGN_ROLES = new Set(["DESIGN_ENGINEER", "DESIGN_LEAD"]);
+
 function NewOpportunityPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -55,6 +60,7 @@ function NewOpportunityPageContent() {
   const [form, setForm] = useState<FormState>({ ...INITIAL, accountId: prefilledAccountId });
   const [accounts, setAccounts] = useState<AccountListItem[]>([]);
   const [sites, setSites] = useState<SiteListItem[]>([]);
+  const [designUsers, setDesignUsers] = useState<{ id: string; name: string; roleName: string }[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [serverError, setServerError] = useState<string | null>(null);
@@ -79,6 +85,13 @@ function NewOpportunityPageContent() {
   useEffect(() => {
     get<{ id: string }>("/auth/me")
       .then((u) => setCurrentUserId(u.id))
+      .catch(() => {});
+  }, []);
+
+  // Load user dropdown filtered to design roles
+  useEffect(() => {
+    get<{ id: string; name: string; roleName: string }[]>("/admin/users/dropdown")
+      .then((rows) => setDesignUsers(rows.filter((u) => DESIGN_ROLES.has(u.roleName))))
       .catch(() => {});
   }, []);
 
@@ -115,6 +128,7 @@ function NewOpportunityPageContent() {
         accountId: form.accountId,
         siteId: form.siteId,
         ownerUserId: currentUserId,
+        designEngineerId: form.designEngineerId || undefined,
         commercialModel: form.commercialModel || undefined,
         estimatedValue: form.estimatedValue ? parseFloat(form.estimatedValue) : undefined,
         estimatedPvKwp: form.estimatedPvKwp ? parseFloat(form.estimatedPvKwp) : undefined,
@@ -194,6 +208,14 @@ function NewOpportunityPageContent() {
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring">
                 <option value="">— Select model —</option>
                 {COMMERCIAL_MODELS.map((m) => <option key={m} value={m}>{COMMERCIAL_MODEL_LABELS[m]}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1.5">Design Engineer</label>
+              <select value={form.designEngineerId} onChange={(e) => set("designEngineerId", e.target.value)}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring">
+                <option value="">— Unassigned —</option>
+                {designUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             </div>
             <div>

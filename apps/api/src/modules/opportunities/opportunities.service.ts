@@ -25,6 +25,17 @@ import {
 import { ProjectsService } from '../projects/projects.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AuditService } from '../../common/audit/audit.service';
+import {
+  computeOpportunityHealth,
+  computeNextActionStatus,
+  startOfMonth,
+  endOfMonth,
+  startOfQuarter,
+  endOfQuarter,
+  type OpportunityHealth,
+  type EffectiveNextActionStatus,
+} from './opportunity-health';
+import type { UpdateNextActionDto } from './opportunities.dto';
 
 // ─── Shared select shape ──────────────────────────────────────────────────────
 
@@ -53,9 +64,11 @@ const OPP_SELECT = {
   accountId: true,
   siteId: true,
   ownerUserId: true,
+  designEngineerId: true,
   account: { select: { id: true, accountCode: true, name: true } },
   site: { select: { id: true, siteCode: true, name: true, gridCategory: true } },
   owner: { select: { id: true, name: true, email: true } },
+  designEngineer: { select: { id: true, name: true, email: true } },
 } as const;
 
 export type OpportunityRecord = {
@@ -83,9 +96,11 @@ export type OpportunityRecord = {
   accountId: string;
   siteId: string;
   ownerUserId: string;
+  designEngineerId: string | null;
   account: { id: string; accountCode: string; name: string };
   site: { id: string; siteCode: string; name: string; gridCategory: string };
   owner: { id: string; name: string; email: string };
+  designEngineer: { id: string; name: string; email: string } | null;
 };
 
 export type OpportunityListItem = OpportunityRecord & {
@@ -101,6 +116,10 @@ export type OpportunityDetail = OpportunityRecord & {
     changedAt: Date;
   }[];
   allowedNextStages: OpportunityStage[];
+  // V1 sales pipeline computed fields
+  lastActivityAt: Date | null;
+  health: OpportunityHealth;
+  effectiveNextActionStatus: EffectiveNextActionStatus;
 };
 
 @Injectable()
@@ -119,8 +138,8 @@ export class OpportunitiesService {
   async findAll(
     query: OpportunityQueryDto,
     user: UserContext,
-  ): Promise<PaginatedResult<OpportunityListItem>> {
-    const { search, accountId, siteId, ownerUserId, stage, isActive, overdue, page, pageSize, sortBy, sortDir } = query;
+  ): Promise<PaginatedResult<OpportunityListItem & { health: OpportunityHealth; lastActivityAt: Date | null; effectiveNextActionStatus: EffectiveNextActionStatus }>> {
+    const { search, accountId, siteId, ownerUserId, designEngineerId, stage, isActive, overdue, page, pageSize, sortBy, sortDir } = query;
 
     // ── Scope enforcement ──────────────────────────────────────────────────
     const scope = await this.authz.getBestScope(user, 'opportunity', 'view');
@@ -131,13 +150,16 @@ export class OpportunitiesService {
     //   assigned → ownerUserId = me  OR  OpportunityMember  OR  ProjectMember on linked project
     //              (PROJECT_ENGINEER is a ProjectMember, not an OpportunityMember)
     //   team/all → no extra filter (Sales Manager sees their team; Director sees all)
+    // 'own' includes both Sales Engineer (ownerUserId) and Design Engineer (designEngineerId)
+    // ownership tags, since both roles legitimately "own" the opp from their angle.
     const scopeFilter: Prisma.OpportunityWhereInput =
       scope === 'own'
-        ? { ownerUserId: user.id }
+        ? { OR: [{ ownerUserId: user.id }, { designEngineerId: user.id }] }
         : scope === 'assigned'
           ? {
               OR: [
                 { ownerUserId: user.id },
+                { designEngineerId: user.id },
                 { members: { some: { userId: user.id } } },
                 // Project-member path: PE/PM are assigned at project level, not opp level
                 { project: { members: { some: { userId: user.id } } } },
@@ -158,14 +180,44 @@ export class OpportunitiesService {
       });
     }
 
+    // Sales-pipeline filter chips — translate each into a Prisma sub-clause
+    if (query.myOnly)               andFilters.push({ ownerUserId: user.id });
+    if (query.mineAsDesignEngineer) andFilters.push({ designEngineerId: user.id });
+    if (query.closingThisMonth)     andFilters.push({ expectedAwardDate: { gte: startOfMonth(now), lte: endOfMonth(now) } });
+    if (query.closingThisQuarter)   andFilters.push({ expectedAwardDate: { gte: startOfQuarter(now), lte: endOfQuarter(now) } });
+    if (query.noNextAction)         andFilters.push({ OR: [{ nextAction: null }, { nextAction: '' }] });
+    if (query.overdueNextAction)    andFilters.push({ AND: [{ nextActionStatus: 'PENDING' }, { nextActionDueDate: { lt: now } }, { stage: { notIn: ['WON', 'LOST'] } }] });
+    if (query.proposalSubmitted)    andFilters.push({ stage: { in: ['BUDGETARY_PROPOSAL', 'FIRM_PROPOSAL'] } });
+    if (query.highValue)            andFilters.push({ estimatedValue: { gte: 1_000_000 } });
+    if (query.wonThisMonth)         andFilters.push({ AND: [{ stage: 'WON' }, { updatedAt: { gte: startOfMonth(now), lte: endOfMonth(now) } }] });
+    if (query.lostThisMonth)        andFilters.push({ AND: [{ stage: 'LOST' }, { updatedAt: { gte: startOfMonth(now), lte: endOfMonth(now) } }] });
+    // No-activity filters use Prisma's `none` quantifier on the activities relation
+    if (query.noActivity14d) {
+      const cutoff = new Date(now.getTime() - 14 * 86_400_000);
+      andFilters.push({ activities: { none: { occurredAt: { gte: cutoff } } } });
+    }
+    if (query.noActivity30d) {
+      const cutoff = new Date(now.getTime() - 30 * 86_400_000);
+      andFilters.push({ activities: { none: { occurredAt: { gte: cutoff } } } });
+    }
+    // Effective next-action status filter
+    if (query.nextActionStatus === 'PENDING') {
+      andFilters.push({ AND: [{ nextActionStatus: 'PENDING' }, { OR: [{ nextActionDueDate: null }, { nextActionDueDate: { gte: now } }] }] });
+    } else if (query.nextActionStatus === 'OVERDUE') {
+      andFilters.push({ AND: [{ nextActionStatus: 'PENDING' }, { nextActionDueDate: { lt: now } }] });
+    } else if (query.nextActionStatus === 'COMPLETED') {
+      andFilters.push({ nextActionStatus: 'COMPLETED' });
+    }
+
     const where: Prisma.OpportunityWhereInput = {
       AND: andFilters,
       ...(accountId && { accountId }),
       ...(siteId && { siteId }),
       ...(ownerUserId && { ownerUserId }),
+      ...(designEngineerId && { designEngineerId }),
       ...(stage && { stage }),
       ...(isActive !== undefined && { isActive }),
-      // Overdue: nextActionDueDate is in the past, and deal is still open
+      // Legacy 'overdue' flag — kept for backwards compatibility
       ...(overdue && {
         nextActionDueDate: { lt: now },
         stage: { notIn: ['WON', 'LOST'] },
@@ -184,18 +236,50 @@ export class OpportunitiesService {
         take: pageSize,
         select: {
           ...OPP_SELECT,
-          _count: { select: { proposals: true } },
+          nextActionType:    true,
+          nextActionStatus:  true,
+          nextActionOwnerId: true,
+          _count: { select: { proposals: true, activities: true } },
+          activities: {
+            take: 1,
+            orderBy: { occurredAt: 'desc' },
+            select: { occurredAt: true },
+          },
         },
       }),
     ]);
 
-    // Strip estimatedValue for roles without pipeline value visibility
-    const mappedItems = (items as OpportunityListItem[]).map((item) => {
+    // Enrich + strip
+    const mappedItems = (items as Array<OpportunityListItem & {
+      nextActionStatus: 'PENDING' | 'COMPLETED' | null;
+      activities: { occurredAt: Date }[];
+    }>).map((item) => {
+      const lastActivityAt = item.activities[0]?.occurredAt ?? null;
+      const enriched = {
+        ...item,
+        lastActivityAt,
+        health: computeOpportunityHealth({
+          stage:             item.stage,
+          nextAction:        item.nextAction,
+          nextActionDueDate: item.nextActionDueDate,
+          nextActionStatus:  item.nextActionStatus,
+          lastActivityAt,
+          now,
+        }),
+        effectiveNextActionStatus: computeNextActionStatus({
+          nextAction:        item.nextAction,
+          nextActionDueDate: item.nextActionDueDate,
+          nextActionStatus:  item.nextActionStatus,
+          now,
+        }),
+      };
+      // Drop the raw activities array we used only for computation
+      delete (enriched as Record<string, unknown>).activities;
+      // Strip estimatedValue for roles without pipeline value visibility
       if (!canViewValue) {
-        const r = item as Record<string, unknown>;
-        delete r['estimatedValue'];
+        delete (enriched as Record<string, unknown>).estimatedValue;
       }
-      return item;
+      return enriched;
     });
 
     return {
@@ -251,7 +335,80 @@ export class OpportunitiesService {
 
     const allowedNextStages = OPPORTUNITY_STAGE_TRANSITIONS[opp.stage].allowedNext as OpportunityStage[];
 
-    return { ...(record as unknown as OpportunityRecord), stageHistory: opp.stageHistory, allowedNextStages };
+    // Compute live health + effective next-action status. Cheap; one extra query.
+    const lastAct = await this.prisma.activity.findFirst({
+      where: { opportunityId: id },
+      orderBy: { occurredAt: 'desc' },
+      select: { occurredAt: true },
+    });
+    const lastActivityAt = lastAct?.occurredAt ?? null;
+    const now = new Date();
+    const health = computeOpportunityHealth({
+      stage: opp.stage,
+      nextAction: (record as { nextAction?: string | null }).nextAction,
+      nextActionDueDate: (record as { nextActionDueDate?: Date | null }).nextActionDueDate,
+      nextActionStatus: (record as { nextActionStatus?: 'PENDING' | 'COMPLETED' | null }).nextActionStatus,
+      lastActivityAt,
+      now,
+    });
+    const effectiveNextActionStatus = computeNextActionStatus({
+      nextAction: (record as { nextAction?: string | null }).nextAction,
+      nextActionDueDate: (record as { nextActionDueDate?: Date | null }).nextActionDueDate,
+      nextActionStatus: (record as { nextActionStatus?: 'PENDING' | 'COMPLETED' | null }).nextActionStatus,
+      now,
+    });
+
+    return {
+      ...(record as unknown as OpportunityRecord),
+      stageHistory: opp.stageHistory,
+      allowedNextStages,
+      lastActivityAt,
+      health,
+      effectiveNextActionStatus,
+    } as OpportunityDetail;
+  }
+
+  // ─── Next-action update (lighter than full opportunity edit) ──────────────
+
+  async updateNextAction(id: string, dto: UpdateNextActionDto, user: UserContext): Promise<OpportunityDetail> {
+    // Reuse findById's scope check
+    const before = await this.findById(id, user);
+    // Owner OR opportunity:edit-team-or-all may modify next action
+    await this.authz.requirePermission(user, 'opportunity', 'edit', {
+      ownerId: before.ownerUserId,
+      opportunityId: id,
+    });
+
+    // If status is being flipped to COMPLETED, stamp completion timestamp
+    const willComplete = dto.nextActionStatus === 'COMPLETED' && before.effectiveNextActionStatus !== 'COMPLETED';
+
+    await this.prisma.opportunity.update({
+      where: { id },
+      data: {
+        ...(dto.nextAction        !== undefined && { nextAction:        dto.nextAction }),
+        ...(dto.nextActionType    !== undefined && { nextActionType:    dto.nextActionType }),
+        ...(dto.nextActionDueDate !== undefined && { nextActionDueDate: dto.nextActionDueDate }),
+        ...(dto.nextActionOwnerId !== undefined && { nextActionOwnerId: dto.nextActionOwnerId }),
+        ...(dto.nextActionStatus  !== undefined && { nextActionStatus:  dto.nextActionStatus }),
+        ...(willComplete && { nextActionCompletedAt: new Date() }),
+        ...(dto.nextActionStatus === 'PENDING' && { nextActionCompletedAt: null }),
+      },
+    });
+
+    // Audit
+    this.audit.record({
+      actor: user,
+      resource: 'opportunity',
+      resourceId: id,
+      action: willComplete ? 'next_action_completed' : 'next_action_updated',
+      metadata: {
+        nextActionType: dto.nextActionType,
+        nextActionDueDate: dto.nextActionDueDate ? String(dto.nextActionDueDate) : null,
+        nextActionOwnerId: dto.nextActionOwnerId,
+      },
+    }).catch(() => {});
+
+    return this.findById(id, user);
   }
 
   // ─── Create ────────────────────────────────────────────────────────────────
@@ -296,8 +453,8 @@ export class OpportunitiesService {
       ),
     );
 
-    const allowedNextStages = OPPORTUNITY_STAGE_TRANSITIONS['LEAD'].allowedNext as OpportunityStage[];
-    return { ...(opp as unknown as OpportunityRecord), stageHistory: opp.stageHistory, allowedNextStages };
+    // Return via findById so the new health/lastActivity/effectiveStatus fields are populated
+    return this.findById(opp.id, user);
   }
 
   // ─── Update ────────────────────────────────────────────────────────────────
@@ -313,8 +470,19 @@ export class OpportunitiesService {
         estimatedPvKwp: dto.estimatedPvKwp ?? undefined,
         estimatedBessKw: dto.estimatedBessKw ?? undefined,
         estimatedBessKwh: dto.estimatedBessKwh ?? undefined,
-        expectedAwardDate: dto.expectedAwardDate ? new Date(dto.expectedAwardDate) : undefined,
-        nextActionDueDate: dto.nextActionDueDate ? new Date(dto.nextActionDueDate) : undefined,
+        // Date conversions: null = clear column, undefined = leave unchanged, string = parse
+        expectedAwardDate:
+          dto.expectedAwardDate === null
+            ? null
+            : dto.expectedAwardDate
+              ? new Date(dto.expectedAwardDate)
+              : undefined,
+        nextActionDueDate:
+          dto.nextActionDueDate === null
+            ? null
+            : dto.nextActionDueDate
+              ? new Date(dto.nextActionDueDate)
+              : undefined,
       },
       select: {
         ...OPP_SELECT,
@@ -325,8 +493,7 @@ export class OpportunitiesService {
       },
     });
 
-    const allowedNextStages = OPPORTUNITY_STAGE_TRANSITIONS[opp.stage].allowedNext as OpportunityStage[];
-    return { ...(opp as unknown as OpportunityRecord), stageHistory: opp.stageHistory, allowedNextStages };
+    return this.findById(opp.id, user);
   }
 
   // ─── Stage transition ─────────────────────────────────────────────────────
@@ -420,7 +587,8 @@ export class OpportunitiesService {
       newProjectId,
     ).catch(() => {});
 
-    return result;
+    // Return enriched detail (health/lastActivityAt/effectiveNextActionStatus computed)
+    return this.findById(id, user);
   }
 
   // ─── Stage transition notifications ──────────────────────────────────────

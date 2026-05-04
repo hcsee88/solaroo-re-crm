@@ -22,6 +22,7 @@ import {
   UpdateOpportunitySchema,
   TransitionStageSchema,
   OpportunityQuerySchema,
+  UpdateNextActionSchema,
 } from './opportunities.dto';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe';
 
@@ -77,5 +78,16 @@ export class OpportunitiesController {
     @CurrentUser() user: UserContext,
   ): Promise<OpportunityDetail> {
     return this.opportunitiesService.transitionStage(id, dto, user);
+  }
+
+  // Dedicated next-action update — finer-grained than full opportunity edit
+  @Patch(':id/next-action')
+  @RequirePermission('opportunity', 'edit')
+  updateNextAction(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(UpdateNextActionSchema)) dto: ReturnType<typeof UpdateNextActionSchema.parse>,
+    @CurrentUser() user: UserContext,
+  ): Promise<OpportunityDetail> {
+    return this.opportunitiesService.updateNextAction(id, dto, user);
   }
 }

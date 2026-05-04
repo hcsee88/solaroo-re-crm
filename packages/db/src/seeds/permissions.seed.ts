@@ -335,6 +335,17 @@ export const PERMISSION_DEFS: PermissionDef[] = [
 
   // Audit log — read-only governance trail. Visible to SUPER_ADMIN + commercial/PMO leadership.
   { resource: 'audit_log', action: 'view', scope: 'all', roles: ['SUPER_ADMIN', 'DIRECTOR', 'PMO_MANAGER'] },
+
+  // ─── Activities (manual sales touchpoints) ────────────────────────────────
+  // Each activity carries an ownerUserId — service-layer scope filter handles 'own'
+  { resource: 'activity', action: 'view',   scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER', 'FINANCE_ADMIN', 'PMO_MANAGER'] },
+  { resource: 'activity', action: 'view',   scope: 'team',     roles: ['SALES_MANAGER'] },
+  { resource: 'activity', action: 'view',   scope: 'own',      roles: ['SALES_ENGINEER'] },
+  { resource: 'activity', action: 'view',   scope: 'assigned', roles: ['PROJECT_MANAGER', 'PROJECT_ENGINEER', 'DESIGN_ENGINEER'] },
+  { resource: 'activity', action: 'create', scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER'] },
+  { resource: 'activity', action: 'create', scope: 'own',      roles: ['SALES_ENGINEER'] },
+  { resource: 'activity', action: 'edit',   scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER'] },
+  { resource: 'activity', action: 'edit',   scope: 'own',      roles: ['SALES_ENGINEER'] },
 ];
 
 export async function seedPermissions(prisma: PrismaClient): Promise<void> {

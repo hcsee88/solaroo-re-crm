@@ -41,6 +41,7 @@ export type NavHref =
   | "/proposals"
   | "/contracts"
   | "/projects"
+  | "/sales-pipeline"
   | "/pmo"
   | "/procurement"
   | "/documents"
@@ -64,6 +65,7 @@ const NAV_BY_ROLE: Record<RoleName, NavHref[]> = {
     "/proposals",
     "/contracts",
     "/projects",
+    "/sales-pipeline",
     "/pmo",
     "/procurement",
     "/documents",
@@ -82,6 +84,7 @@ const NAV_BY_ROLE: Record<RoleName, NavHref[]> = {
 
   SALES_MANAGER: [
     "/dashboard",
+    "/sales-pipeline",
     "/accounts",
     "/contacts",
     "/sites",
@@ -94,6 +97,7 @@ const NAV_BY_ROLE: Record<RoleName, NavHref[]> = {
 
   SALES_ENGINEER: [
     "/dashboard",
+    "/sales-pipeline",
     "/accounts",
     "/contacts",
     "/sites",

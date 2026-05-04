@@ -1,0 +1,431 @@
+Dev Log — 2026-04-27
+Session: Sales Pipeline Discipline V1 (Activities + Next Action + Health + /sales-pipeline)
+=============================================================
+
+CONTEXT
+-------
+Per spec: improve sales-pipeline visibility WITHOUT integrating email,
+WhatsApp, calendar, telephony, or AI. All sales activities remain manual
+log entries. Goals: management can answer "which deals are stale", "who
+is following up", "what's overdue", "what's closing this month".
+
+This was an extension session, not a redesign. Existing Opportunity model
+already had `nextAction` (text) + `nextActionDueDate`. Existing Activity
+model already had core fields. Existing SavedViewsBar component was
+already built generically. Existing notification + audit + dashboard
+patterns were reused.
+
+=============================================================
+SCHEMA CHANGES (additive only)
+=============================================================
+
+packages/db/prisma/schema/crm.prisma
+  ActivityType enum: + WHATSAPP, PROPOSAL_FOLLOW_UP, GENERAL_NOTE
+                     (kept legacy NOTE, TASK for backwards compat)
+  + new enum NextActionType    (FOLLOW_UP, SITE_SURVEY, REVISED_QUOTATION,
+                                 CLIENT_MEETING, INTERNAL_REVIEW, OTHER)
+  + new enum NextActionStatus  (PENDING, COMPLETED — OVERDUE is computed
+                                 at read time, not stored)
+  Activity model:
+    + ownerUserId  String   @relation("ActivityOwner")  (REQUIRED — who logged it)
+    + siteId       String?  @relation                    (optional cross-link)
+    + indexes on (opportunityId, occurredAt), (accountId, occurredAt),
+                 (ownerUserId, occurredAt)
+  Opportunity model:
+    + nextActionType         NextActionType?
+    + nextActionStatus       NextActionStatus @default(PENDING)
+    + nextActionOwnerId      String?  @relation("NextActionOwner")
+    + nextActionCompletedAt  DateTime?
+  Site model: + activities Activity[] back-ref
+
+packages/db/prisma/schema/auth.prisma
+  User model: + activitiesLogged Activity[] @relation("ActivityOwner")
+              + nextActionsAssigned Opportunity[] @relation("NextActionOwner")
+
+packages/types/src/index.ts (frontend types)
+  + OpportunityHealth                ('HEALTHY' | 'AT_RISK' | 'STALE' | 'OVERDUE')
+  + EffectiveNextActionStatus        ('PENDING' | 'COMPLETED' | 'OVERDUE' | 'NONE')
+  + NextActionTypeValue              (6 enum strings)
+  OpportunityListItem extended with: nextActionType, nextActionStatus,
+                                     nextActionOwnerId, lastActivityAt,
+                                     health, effectiveNextActionStatus,
+                                     _count.activities
+  OpportunityDetail   extended with: nextActionCompletedAt
+                                     (everything above already inherited)
+
+packages/types/src/permissions.ts
+  RESOURCES += 'activity'
+
+packages/db/src/seeds/permissions.seed.ts
+  + activity:view    (all)      DIRECTOR, SALES_MANAGER, FINANCE_ADMIN, PMO_MANAGER
+  + activity:view    (team)     SALES_MANAGER
+  + activity:view    (own)      SALES_ENGINEER
+  + activity:view    (assigned) PROJECT_MANAGER, PROJECT_ENGINEER, DESIGN_ENGINEER
+  + activity:create  (all)      DIRECTOR, SALES_MANAGER
+  + activity:create  (own)      SALES_ENGINEER
+  + activity:edit    (all)      DIRECTOR, SALES_MANAGER
+  + activity:edit    (own)      SALES_ENGINEER
+
+NB: schema NOT pushed to local DB this session — local Postgres was
+offline when this work was done. Schema NOT pushed to Railway — auto
+mode forbids unsanctioned production-DB changes. Apply locally:
+  1) start local Postgres
+  2) cd packages/db && npx prisma db push --schema prisma/schema --accept-data-loss
+  3) pnpm db:seed (picks up new activity perms)
+
+=============================================================
+NEW BACKEND MODULES
+=============================================================
+
+apps/api/src/modules/activities/  (NEW MODULE)
+  activities.module.ts
+  activities.controller.ts
+    GET    /api/activities         (list, paginated, scope-filtered)
+    GET    /api/activities/:id
+    POST   /api/activities         (auto-fills accountId/siteId from opp)
+    PATCH  /api/activities/:id
+    DELETE /api/activities/:id     (only owner OR DIRECTOR; rule: 7-day
+                                    edit window for non-Director)
+  activities.service.ts
+    Scope filter:
+      own       — ownerUserId = me
+      assigned  — me OR opp owner OR opp member OR project member/PM
+      team/all  — no extra filter
+    Helper: lastActivityAt(opportunityId)
+  activities.dto.ts
+    Zod CreateActivitySchema, UpdateActivitySchema, ActivityQuerySchema
+
+apps/api/src/modules/opportunities/opportunity-health.ts  (NEW pure helper)
+  computeOpportunityHealth(opp, lastActivityAt) → 4-state health
+  computeNextActionStatus(opp)                  → 4-state effective status
+  startOfMonth/endOfMonth/startOfQuarter/endOfQuarter
+  Pure functions, no DB, no IO. Easy to test.
+
+apps/api/src/modules/opportunities/opportunities.service.ts (extended)
+  findAll() — added 12 new filter params translated to Prisma where:
+    myOnly, closingThisMonth, closingThisQuarter,
+    noNextAction, overdueNextAction, noActivity14d, noActivity30d,
+    proposalSubmitted, highValue (≥1M), wonThisMonth, lostThisMonth,
+    nextActionStatus (PENDING/COMPLETED/OVERDUE — server interprets OVERDUE)
+  findAll() now selects:
+    + nextActionType, nextActionStatus, nextActionOwnerId
+    + activities (take: 1, latest occurredAt) — used to compute health
+    + _count.activities
+  findAll() result enriched per item with: lastActivityAt, health,
+    effectiveNextActionStatus
+  findById() does one extra query for latest activity, computes same
+    enrichments
+  + new method updateNextAction(id, dto, user) — granular endpoint to
+    flip status / re-assign / change due date without touching the
+    full opportunity update path. Audits as 'next_action_completed'
+    or 'next_action_updated'.
+  create() / update() / transitionStage() now return findById() result
+  (instead of raw record) so health/lastActivityAt/effective status are
+  always present on the response. Slight extra DB hit; correct contract.
+
+apps/api/src/modules/opportunities/opportunities.controller.ts (extended)
+  + PATCH /api/opportunities/:id/next-action
+
+apps/api/src/modules/opportunities/opportunities.dto.ts (extended)
+  + UpdateNextActionSchema
+  CreateOpportunitySchema gained nextActionType + nextActionOwnerId
+  OpportunityQuerySchema gained the 12 boolean filter params +
+                                  nextActionStatus enum
+
+apps/api/src/modules/reporting/reporting.controller.ts (extended)
+  + GET /api/reporting/sales-pipeline
+
+apps/api/src/modules/reporting/reporting.service.ts (extended)
+  + getSalesPipelineMetrics(user) — single Promise.all of 14 queries.
+    Returns:
+      pipelineSummary { total, value, weighted, avg deal size }
+      stageBreakdown[]
+      activitySummary { total this week, byOwner[] }
+      followUpMonitoring { overdue, noNextAction, stale 14d, stale 30d }
+      proposalMonitoring { proposalsAwaitingFollowup }
+      closingForecast { thisMonthCount, thisMonthValue, thisQuarterCount,
+                         thisMonthList[] }
+      topOpportunities[10]
+      wonThisMonth { count, value }
+
+apps/api/src/app.module.ts: + ActivitiesModule import + register
+
+=============================================================
+WORKER ADDITIONS (services/worker/src/index.ts)
+=============================================================
+
+Same setInterval pattern as existing daily-digest job — no Redis added.
+
+  SALES_TICK_MS = 60 * 60 * 1000  (hourly)
+  RECENT_DEDUPE_HOURS = 22         (re-fire roughly daily)
+
+  notifyOnce() — generic helper that checks for an existing notification
+  with matching {userId, type, resource, resourceId} within the last 22h
+  and skips if found. Avoids spam without adding a new schema field.
+
+  3 new tick functions:
+    tickOverdueNextActions()  — opps with PENDING + due<now → notify
+                                opp owner + nextActionOwner
+    tickProposalNoFollowup()  — opps in BUDGETARY_PROPOSAL or
+                                FIRM_PROPOSAL with no activity in 3 days
+                                → notify owner
+    tickStaleOpportunities()  — non-terminal opps with no activity in
+                                14 days → notify owner
+
+  Notification types: next_action_overdue, proposal_no_followup,
+                      opportunity_stale
+  Accent colours added in apps/web/src/lib/notification-utils.ts
+
+  All three are no-op when there are zero matching opps.
+
+=============================================================
+NEW FRONTEND COMPONENTS + PAGES
+=============================================================
+
+apps/web/src/components/opportunities/health-badge.tsx (NEW)
+  4-state pill (HEALTHY green · AT_RISK amber · STALE gray · OVERDUE red)
+  with icon. Two sizes (sm/md).
+
+apps/web/src/components/opportunities/next-action-panel.tsx (NEW)
+  Replaces the old inline NextActionPanel inside opp detail page.
+  Shows status pill, type, due date, owner.
+  "Mark complete" / "Reopen" buttons. Inline edit form with type +
+  due-date + owner pickers. Calls PATCH /opportunities/:id/next-action.
+
+apps/web/src/components/activities/activity-timeline.tsx (NEW)
+  Embeddable timeline (newest-first). Pass any of opportunityId /
+  accountId / contactId / siteId. Inline quick-add form with type
+  picker chips (CALL/EMAIL/WHATSAPP/MEETING/SITE_VISIT/PROPOSAL_
+  FOLLOW_UP/GENERAL_NOTE), subject, body, occurredAt. Posts to
+  POST /api/activities; refreshes on success.
+
+apps/web/src/app/(app)/sales-pipeline/page.tsx (NEW)
+  Dashboard page. Sections:
+    Pipeline summary (4 KPIs)
+    By stage (table with bar)
+    Sales activity (KPI + by-owner bar list)
+    Follow-up monitoring (4 KPIs colour-coded)
+    Proposal monitoring (1 KPI)
+    Closing forecast (3 KPIs + this-month detail table)
+    Top 10 by value (table)
+  Reuses Section/Kpi building-block style from /reports.
+
+apps/web/src/app/(app)/opportunities/[id]/page.tsx (modified)
+  + import HealthBadge + StructuredNextActionPanel + ActivityTimeline
+  Header gains <HealthBadge> next to <StageBadge>
+  Old inline NextActionPanel is replaced at the call site by the new
+    component (the inline definition is still in the file as dead code —
+    safe to delete in a follow-up cleanup commit)
+  Activity timeline embedded as a new full-width panel under
+    next-action
+
+apps/web/src/app/(app)/opportunities/page.tsx (modified)
+  + import SavedViewsBar + HealthBadge
+  + new state: salesFilters: Record<string, boolean>
+  + 11 filter chips above the existing stage pills:
+       My opportunities / Closing this month / Closing this quarter /
+       No next action / Overdue next action / No activity 14d / 30d /
+       Proposal submitted / High value (≥1M) /
+       Won this month / Lost this month
+  + SavedViewsBar wired to module="opportunities"
+  + new "Health" column in the table
+  Column count bumped from 6/7 to 7/8
+
+apps/web/src/app/(app)/accounts/[id]/page.tsx (modified)
+  + import ActivityTimeline
+  + new tab "Activities" (tab union extended)
+  + tab body renders <ActivityTimeline accountId={id} />
+
+apps/web/src/components/layout/sidebar.tsx (modified)
+  + Target icon import
+  + new nav entry "/sales-pipeline" with Target icon
+
+apps/web/src/lib/role-ui.ts (modified)
+  + "/sales-pipeline" added to NavHref union
+  + DIRECTOR, SALES_MANAGER, SALES_ENGINEER nav lists include it
+  Other roles intentionally don't see it (PMO/Project/Design/etc don't
+  need sales discipline view)
+
+apps/web/src/lib/notification-utils.ts (modified)
+  + accent colours for next_action_overdue (red), proposal_no_followup
+    (amber), opportunity_stale (amber)
+
+=============================================================
+PERMISSIONS — what each role can do
+=============================================================
+
+For 'activity' resource:
+  DIRECTOR        view-all, create-all, edit-all
+  SALES_MANAGER   view-team, create-all, edit-all
+  SALES_ENGINEER  view-own, create-own, edit-own
+  PMO_MANAGER     view-all (no create/edit — read-only governance)
+  FINANCE_ADMIN   view-all (read-only)
+  PROJECT_MANAGER view-assigned (only on opps linked to their projects)
+  PROJECT_ENGINEER view-assigned (same)
+  DESIGN_ENGINEER view-assigned (same)
+  Other roles     no access
+
+For next-action mutations:
+  Reuses existing 'opportunity:edit' permission. Service-layer scope
+  check ensures SALES_ENGINEER can only edit their own opps' next
+  action. SALES_MANAGER edits any opp. DIRECTOR edits any opp.
+
+=============================================================
+ASSUMPTIONS / SCOPE DECISIONS
+=============================================================
+
+1. OVERDUE next-action-status is computed at read time, not stored.
+   Stored values are only PENDING / COMPLETED. The API derives OVERDUE
+   from (PENDING && nextActionDueDate < now). This avoids needing a
+   worker reconciliation pass, and the UI is always live.
+
+2. Activity ownerUserId is REQUIRED (not optional). Set automatically
+   from the calling user — there's no "log on behalf of" feature in V1.
+
+3. Activity delete is restricted to the owner AND only within the first
+   7 days of creation. Older activities can only be deleted by DIRECTOR
+   or SUPER_ADMIN. Audit-trail integrity > convenience.
+
+4. "High value" filter uses a hardcoded ≥ RM 1,000,000 threshold. If
+   business wants this configurable, move to a system setting later.
+
+5. Worker dedupe window is 22 hours, not 24. Tick runs hourly. Means a
+   notification fires once per ~24h cycle even if the underlying
+   condition persists. Rough but cheap.
+
+6. Worker is NOT deployed to Railway in this commit — only to local
+   `pnpm dev`. Production digest + sales ticks won't fire until the
+   worker service is properly deployed (separate ticket).
+
+7. Did NOT touch Saved Views internals — reused the existing
+   <SavedViewsBar> component as-is. Verified it works generically by
+   passing module="opportunities".
+
+8. Did NOT remove the old inline NextActionPanel definition from the
+   opp detail page. It's dead code (not referenced) — should be deleted
+   in a follow-up cleanup commit. Left it in to keep this diff focused.
+
+9. The OpportunityListItem type in @solaroo/types now requires
+   `health`, `lastActivityAt`, `effectiveNextActionStatus`, etc on
+   every list response. The API populates these for every row. If any
+   other consumer is reading this type from a non-API source, it'll
+   need a code update.
+
+10. CONTRACTING stage is included in OPPORTUNITY_STAGE_ORDER but not
+    in PROPOSAL_STAGES (only BUDGETARY_PROPOSAL + FIRM_PROPOSAL trigger
+    the proposal-no-followup notification). Intentional — once you're
+    in CONTRACTING the deal owner is in heavy negotiation and a
+    "follow up" nudge is condescending.
+
+=============================================================
+MIGRATION + MANUAL TEST CHECKLIST
+=============================================================
+
+LOCAL APPLY:
+
+  1. Start local Postgres
+  2. cd packages/db && npx prisma db push --schema prisma/schema --accept-data-loss
+     (additive — no destructive changes)
+  3. cd ../.. && pnpm db:seed
+     (verify "270 permissions seeded" — 268 + 2 new activity rows… actually
+      8 rows for activity:view/create/edit across scopes, total expected
+      ~276 perms. Exact count visible in seed output.)
+  4. pnpm dev (API + Web + Worker all start)
+  5. Hard-refresh browser at http://localhost:3000
+
+PRODUCTION APPLY (when ready, with explicit user authorization):
+
+  1. cd packages/db && DATABASE_URL=<railway-tcp-proxy-url> npx prisma db push
+     --schema prisma/schema --accept-data-loss
+  2. DATABASE_URL=<railway-tcp-proxy-url> pnpm db:seed
+  3. git add -A && git commit + git push (auto-deploys Web + API)
+  4. Worker is NOT deployed today. Daily digest + sales ticks remain
+     local-only until the worker service is set up on Railway.
+
+MANUAL TEST (login as director@pekatgroup.com / Test@1234):
+
+  ✅ Sidebar shows "Sales Pipeline" entry (Target icon)
+  ✅ /sales-pipeline loads, shows zeros (production has no opps yet)
+  ✅ /opportunities list shows the 11 new filter chips above stage pills
+  ✅ /opportunities list shows new "Health" column (— for now)
+  ✅ /opportunities list shows SavedViewsBar at the top
+  ✅ Toggle "My opportunities" — query string adds &myOnly=true
+  ✅ Save current filter combo as a saved view → reload → it persists
+  ✅ Open any opportunity → header shows Stage + Health badges
+  ✅ Opp detail shows new structured NextAction panel with status pill
+  ✅ Click "Set next action" → form opens with type + date + owner
+  ✅ Save → list refreshes → status pill updates
+  ✅ Click "Mark complete" → status flips to Completed
+  ✅ Activity timeline panel appears at bottom of overview
+  ✅ Click "Log activity" → quick-add form with type chips appears
+  ✅ Submit a CALL activity → list refreshes, activity appears
+  ✅ Open an Account → click "Activities" tab → same timeline embedded
+  ✅ Open Notifications bell → no spam from worker yet (it's hourly)
+  ✅ Worker logs in console: "Worker starting… digest interval = 30 min
+       · sales interval = 60 min"
+
+LOGIN AS sales1@pekatgroup.com / Test@1234 (SALES_ENGINEER):
+  ✅ Can see /sales-pipeline (their own filtered view)
+  ✅ Can log activities only on opps they own
+  ✅ Cannot edit activities created by another user (403)
+  ✅ Can mark their own opps' next action as complete
+  ✅ Cannot edit other salespeople's opps
+
+=============================================================
+FILES CHANGED THIS SESSION
+=============================================================
+
+Schema (3 files):
+  packages/db/prisma/schema/crm.prisma
+  packages/db/prisma/schema/auth.prisma
+  packages/db/src/seeds/permissions.seed.ts
+
+Types (1 file):
+  packages/types/src/permissions.ts
+  packages/types/src/index.ts
+
+Backend new (4 files):
+  apps/api/src/modules/activities/activities.module.ts
+  apps/api/src/modules/activities/activities.controller.ts
+  apps/api/src/modules/activities/activities.service.ts
+  apps/api/src/modules/activities/activities.dto.ts
+  apps/api/src/modules/opportunities/opportunity-health.ts
+
+Backend modified (5 files):
+  apps/api/src/app.module.ts
+  apps/api/src/modules/opportunities/opportunities.controller.ts
+  apps/api/src/modules/opportunities/opportunities.dto.ts
+  apps/api/src/modules/opportunities/opportunities.service.ts
+  apps/api/src/modules/reporting/reporting.controller.ts
+  apps/api/src/modules/reporting/reporting.service.ts
+
+Worker modified (1 file):
+  services/worker/src/index.ts
+
+Frontend new (4 files):
+  apps/web/src/components/opportunities/health-badge.tsx
+  apps/web/src/components/opportunities/next-action-panel.tsx
+  apps/web/src/components/activities/activity-timeline.tsx
+  apps/web/src/app/(app)/sales-pipeline/page.tsx
+
+Frontend modified (5 files):
+  apps/web/src/app/(app)/opportunities/[id]/page.tsx
+  apps/web/src/app/(app)/opportunities/page.tsx
+  apps/web/src/app/(app)/accounts/[id]/page.tsx
+  apps/web/src/components/layout/sidebar.tsx
+  apps/web/src/lib/role-ui.ts
+  apps/web/src/lib/notification-utils.ts
+
+Verification:
+  pnpm --filter @solaroo/api    exec tsc --noEmit  → clean
+  pnpm --filter @solaroo/worker exec tsc --noEmit  → clean
+  pnpm --filter @solaroo/web    exec tsc --noEmit  → clean
+
+NOT done in this commit:
+  - Local schema push (Postgres offline)
+  - Production schema push (auto-mode forbids)
+  - Re-seed (depends on #1)
+  - Git commit + push to Railway
+  - Browser smoke test (depends on #1)
+  - Removing the dead inline NextActionPanel from opp detail page
+=============================================================

@@ -16,6 +16,7 @@ import {
   Archive,
   Wrench,
   BarChart3,
+  Target,
   Settings,
   History,
 } from "lucide-react";
@@ -35,6 +36,7 @@ const ALL_NAV_ITEMS: { href: NavHref; label: string; icon: React.ElementType }[]
   { href: "/sites",         label: "Sites",         icon: MapPin },
   { href: "/opportunities", label: "Opportunities", icon: TrendingUp },
   { href: "/proposals",     label: "Proposals",     icon: FileText },
+  { href: "/sales-pipeline",label: "Sales Pipeline",icon: Target },
   { href: "/contracts",     label: "Contracts",     icon: FileSignature },
   { href: "/projects",      label: "Projects",      icon: FolderKanban },
   { href: "/pmo",           label: "PMO",           icon: ShieldCheck },

@@ -27,6 +27,7 @@ import { AdminModule } from "./modules/admin/admin.module";
 import { NotificationsModule } from "./modules/notifications/notifications.module";
 import { SearchModule } from "./modules/search/search.module";
 import { SavedViewsModule } from "./modules/saved-views/saved-views.module";
+import { ActivitiesModule } from "./modules/activities/activities.module";
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { SavedViewsModule } from "./modules/saved-views/saved-views.module";
     NotificationsModule,
     SearchModule,
     SavedViewsModule,
+    ActivitiesModule,
   ],
   providers: [
     // JWT auth — runs first; rejects unauthenticated requests (except @Public routes)

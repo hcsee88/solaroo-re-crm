@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../common/database/prisma.service';
 import { AuthzService } from '../../common/authz/authz.service';
 import { UserContext } from '@solaroo/types';
+import type { OpportunityStage } from '@solaroo/db';
 
 // ─── Response Types ────────────────────────────────────────────────────────────
 
@@ -541,6 +542,206 @@ export class ReportingService {
         ...a,
         performedAt: a.performedAt.toISOString(),
       })),
+      generatedAt: now.toISOString(),
+    };
+  }
+
+  // ─── Sales Pipeline Dashboard (V1) ──────────────────────────────────────
+  // Separate from /pmo (which is delivery-focused). Aimed at SALES_MANAGER + DIRECTOR.
+  async getSalesPipelineMetrics(_user: UserContext) { // eslint-disable-line @typescript-eslint/no-unused-vars
+    const now = new Date();
+    const startMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endMonth   = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const startQ     = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+    const endQ       = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3 + 3, 0, 23, 59, 59, 999);
+    const sevenDaysAgo  = new Date(now.getTime() - 7  * 86_400_000);
+    const fourteenDays  = new Date(now.getTime() - 14 * 86_400_000);
+    const thirtyDays    = new Date(now.getTime() - 30 * 86_400_000);
+    const threeDaysAgo  = new Date(now.getTime() - 3  * 86_400_000);
+    const TERMINAL = ['WON', 'LOST'] as OpportunityStage[];
+    const PROPOSAL_STAGES = ['BUDGETARY_PROPOSAL', 'FIRM_PROPOSAL'] as OpportunityStage[];
+
+    const [
+      activeOpps,
+      pipelineValueAgg,
+      stageBreakdown,
+      activitiesThisWeek,
+      activityByOwner,
+      overdueNextActions,
+      noNextAction,
+      stale30,
+      stale14,
+      proposalsAwaitingFollowup,
+      closingThisMonthList,
+      closingThisQuarterList,
+      topOpportunities,
+      wonThisMonth,
+    ] = await Promise.all([
+      // Pipeline Summary base
+      this.prisma.opportunity.findMany({
+        where: { stage: { notIn: TERMINAL } },
+        select: { id: true, estimatedValue: true, probabilityPercent: true },
+      }),
+      this.prisma.opportunity.aggregate({
+        where: { stage: { notIn: TERMINAL } },
+        _sum: { estimatedValue: true },
+        _count: { id: true },
+      }),
+      // Stage breakdown
+      this.prisma.opportunity.groupBy({
+        by: ['stage'],
+        where: { stage: { notIn: TERMINAL } },
+        _count: { id: true },
+        _sum: { estimatedValue: true },
+      }),
+      // Sales activity summary
+      this.prisma.activity.count({ where: { occurredAt: { gte: sevenDaysAgo } } }),
+      this.prisma.activity.groupBy({
+        by: ['ownerUserId'],
+        where: { occurredAt: { gte: sevenDaysAgo } },
+        _count: { id: true },
+      }),
+      // Follow-up monitoring
+      this.prisma.opportunity.count({
+        where: {
+          stage: { notIn: TERMINAL },
+          nextActionStatus: 'PENDING',
+          nextActionDueDate: { lt: now },
+        },
+      }),
+      this.prisma.opportunity.count({
+        where: {
+          stage: { notIn: TERMINAL },
+          OR: [{ nextAction: null }, { nextAction: '' }],
+        },
+      }),
+      this.prisma.opportunity.count({
+        where: {
+          stage: { notIn: TERMINAL },
+          activities: { none: { occurredAt: { gte: thirtyDays } } },
+        },
+      }),
+      this.prisma.opportunity.count({
+        where: {
+          stage: { notIn: TERMINAL },
+          activities: { none: { occurredAt: { gte: fourteenDays } } },
+        },
+      }),
+      // Proposal monitoring — opps in proposal stage with no follow-up activity in last 3 days
+      this.prisma.opportunity.findMany({
+        where: {
+          stage: { in: PROPOSAL_STAGES },
+          activities: { none: { occurredAt: { gte: threeDaysAgo } } },
+        },
+        select: {
+          id: true,
+          opportunityCode: true,
+          title: true,
+          stage: true,
+          updatedAt: true,
+          owner: { select: { id: true, name: true } },
+          account: { select: { id: true, name: true } },
+        },
+        orderBy: { updatedAt: 'asc' },
+        take: 20,
+      }),
+      // Closing forecast — this month
+      this.prisma.opportunity.findMany({
+        where: {
+          stage: { notIn: TERMINAL },
+          expectedAwardDate: { gte: startMonth, lte: endMonth },
+        },
+        select: {
+          id: true, opportunityCode: true, title: true, stage: true,
+          estimatedValue: true, probabilityPercent: true, expectedAwardDate: true,
+          owner: { select: { id: true, name: true } },
+          account: { select: { id: true, name: true } },
+        },
+        orderBy: { expectedAwardDate: 'asc' },
+      }),
+      // Closing forecast — this quarter
+      this.prisma.opportunity.count({
+        where: {
+          stage: { notIn: TERMINAL },
+          expectedAwardDate: { gte: startQ, lte: endQ },
+        },
+      }),
+      // Top 10 open opportunities by value
+      this.prisma.opportunity.findMany({
+        where: { stage: { notIn: TERMINAL }, estimatedValue: { not: null } },
+        orderBy: { estimatedValue: 'desc' },
+        take: 10,
+        select: {
+          id: true, opportunityCode: true, title: true, stage: true,
+          estimatedValue: true, probabilityPercent: true, expectedAwardDate: true,
+          owner: { select: { id: true, name: true } },
+          account: { select: { id: true, name: true } },
+        },
+      }),
+      this.prisma.opportunity.aggregate({
+        where: { stage: 'WON', updatedAt: { gte: startMonth, lte: endMonth } },
+        _count: { id: true },
+        _sum: { estimatedValue: true },
+      }),
+    ]);
+
+    // Resolve user IDs → names for the activityByOwner table
+    const ownerIds = activityByOwner.map((a) => a.ownerUserId);
+    const owners = ownerIds.length
+      ? await this.prisma.user.findMany({ where: { id: { in: ownerIds } }, select: { id: true, name: true } })
+      : [];
+    const ownerMap = new Map(owners.map((u) => [u.id, u.name]));
+
+    // Weighted pipeline value: estimatedValue * probabilityPercent / 100
+    let weightedTotal = 0;
+    let dealCount = 0;
+    let valueSum = 0;
+    for (const o of activeOpps) {
+      const v = Number(o.estimatedValue ?? 0);
+      const p = (o.probabilityPercent ?? 0) / 100;
+      weightedTotal += v * p;
+      if (v > 0) { valueSum += v; dealCount++; }
+    }
+    const averageDealSize = dealCount > 0 ? valueSum / dealCount : 0;
+
+    return {
+      pipelineSummary: {
+        totalActiveOpportunities: pipelineValueAgg._count?.id ?? 0,
+        totalPipelineValue:       Number(pipelineValueAgg._sum?.estimatedValue ?? 0),
+        weightedPipelineValue:    Math.round(weightedTotal),
+        averageDealSize:          Math.round(averageDealSize),
+      },
+      stageBreakdown: stageBreakdown.map((r) => ({
+        stage: r.stage,
+        count: r._count.id,
+        value: Number(r._sum.estimatedValue ?? 0),
+      })),
+      activitySummary: {
+        totalActivitiesThisWeek: activitiesThisWeek,
+        byOwner: activityByOwner
+          .map((a) => ({ userId: a.ownerUserId, name: ownerMap.get(a.ownerUserId) ?? '(unknown)', count: a._count.id }))
+          .sort((a, b) => b.count - a.count),
+      },
+      followUpMonitoring: {
+        overdueNextActions,
+        noNextAction,
+        staleOpportunities30d: stale30,
+        staleOpportunities14d: stale14,
+      },
+      proposalMonitoring: {
+        proposalsAwaitingFollowup,
+      },
+      closingForecast: {
+        thisMonthCount:   closingThisMonthList.length,
+        thisMonthValue:   closingThisMonthList.reduce((s, o) => s + Number(o.estimatedValue ?? 0), 0),
+        thisQuarterCount: closingThisQuarterList,
+        thisMonthList:    closingThisMonthList,
+      },
+      topOpportunities,
+      wonThisMonth: {
+        count: wonThisMonth._count?.id ?? 0,
+        value: Number(wonThisMonth._sum?.estimatedValue ?? 0),
+      },
       generatedAt: now.toISOString(),
     };
   }

@@ -23,6 +23,8 @@ export const RESOURCES = [
   'contract', 'invoice_milestone',
   // Sensitive pseudo-resources (field-level gates)
   'margin', 'cost', 'payment_status',
+  // Sales pipeline
+  'activity',
   // Admin
   'reporting', 'user_admin', 'role_admin', 'audit_log',
 ] as const;

@@ -18,6 +18,8 @@ import {
   COMMERCIAL_MODEL_LABELS,
   OPPORTUNITY_STAGE_ORDER,
 } from "@solaroo/types";
+import { SavedViewsBar } from "@/components/saved-views/saved-views-bar";
+import { HealthBadge, type Health } from "@/components/opportunities/health-badge";
 
 const PAGE_SIZE = 25;
 const ALL_STAGES: OpportunityStageValue[] = [
@@ -77,8 +79,8 @@ function OpportunitiesPageContent() {
   const router = useRouter();
   const roleName  = useRoleName();
   const showValue = canSeeOpportunityValue(roleName);
-  // Base columns: Code, Title, Stage, Next Action, Account, Owner = 6; +1 for Value
-  const colCount  = 6 + (showValue ? 1 : 0);
+  // Base cols: Code, Title, Stage, Health, Next Action, Account, Owner, Design Eng = 8; +1 for Value
+  const colCount  = 8 + (showValue ? 1 : 0);
 
   const accountIdFilter = searchParams.get("accountId") ?? "";
   const initialOverdue  = searchParams.get("overdue") === "true";
@@ -91,6 +93,9 @@ function OpportunitiesPageContent() {
   const [overdueOnly, setOverdueOnly] = useState(initialOverdue);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // V1 sales pipeline filter chips. All independent toggles.
+  const [salesFilters, setSalesFilters] = useState<Record<string, boolean>>({});
 
   // Sync URL param → state on mount
   useEffect(() => {
@@ -111,6 +116,10 @@ function OpportunitiesPageContent() {
         ...(accountIdFilter && { accountId: accountIdFilter }),
         ...(overdueOnly && { overdue: "true" }),
       });
+      // V1 sales pipeline filter chips — append to query string when active
+      for (const [k, v] of Object.entries(salesFilters)) {
+        if (v) params.set(k, "true");
+      }
       const result = await get<PaginatedResult<OpportunityListItem>>(
         `/opportunities?${params}`
       );
@@ -121,7 +130,7 @@ function OpportunitiesPageContent() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, stageFilter, accountIdFilter, overdueOnly]);
+  }, [page, search, stageFilter, accountIdFilter, overdueOnly, salesFilters]);
 
   useEffect(() => {
     const timer = setTimeout(fetchOpportunities, search ? 300 : 0);
@@ -177,6 +186,64 @@ function OpportunitiesPageContent() {
           </button>
         </div>
       )}
+
+      {/* Saved Views — apply/save personal filter sets */}
+      <SavedViewsBar
+        module="opportunities"
+        currentFilters={{ stageFilter, overdueOnly, search, ...salesFilters }}
+        onApply={(f) => {
+          setStageFilter(((f.stageFilter as string) ?? "") as OpportunityStageValue | "");
+          setOverdueOnly(Boolean(f.overdueOnly));
+          setSearch((f.search as string) ?? "");
+          // Restore sales-pipeline chip state
+          const next: Record<string, boolean> = {};
+          for (const k of [
+            "myOnly", "mineAsDesignEngineer", "closingThisMonth", "closingThisQuarter",
+            "noNextAction", "overdueNextAction", "noActivity14d", "noActivity30d",
+            "proposalSubmitted", "highValue", "wonThisMonth", "lostThisMonth",
+          ]) {
+            if (f[k]) next[k] = true;
+          }
+          setSalesFilters(next);
+          setPage(1);
+        }}
+      />
+
+      {/* V1 Sales pipeline filter chips */}
+      <div className="flex gap-1.5 overflow-x-auto pb-1 flex-wrap text-xs">
+        {[
+          { key: "myOnly",              label: "My opportunities" },
+          { key: "mineAsDesignEngineer", label: "Designed by me" },
+          { key: "closingThisMonth",    label: "Closing this month" },
+          { key: "closingThisQuarter",  label: "Closing this quarter" },
+          { key: "noNextAction",        label: "No next action" },
+          { key: "overdueNextAction",   label: "Overdue next action" },
+          { key: "noActivity14d",       label: "No activity 14d" },
+          { key: "noActivity30d",       label: "No activity 30d" },
+          { key: "proposalSubmitted",   label: "Proposal submitted" },
+          { key: "highValue",           label: "High value (≥1M)" },
+          { key: "wonThisMonth",        label: "Won this month" },
+          { key: "lostThisMonth",       label: "Lost this month" },
+        ].map(({ key, label }) => {
+          const active = !!salesFilters[key];
+          return (
+            <button
+              key={key}
+              onClick={() => {
+                setSalesFilters((p) => ({ ...p, [key]: !p[key] }));
+                setPage(1);
+              }}
+              className={`flex-shrink-0 rounded-full px-2.5 py-1 font-medium transition-all border ${
+                active
+                  ? "bg-primary/10 text-primary border-primary"
+                  : "border-input text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
 
       {/* Pipeline stage filter pills */}
       <div className="flex gap-2 overflow-x-auto pb-1 flex-wrap">
@@ -268,10 +335,12 @@ function OpportunitiesPageContent() {
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Code</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Title</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Stage</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Health</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Next Action</th>
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Account</th>
                 {showValue && <th className="px-4 py-3 text-right font-medium text-muted-foreground">Value</th>}
                 <th className="px-4 py-3 text-left font-medium text-muted-foreground">Owner</th>
+                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Design Eng</th>
               </tr>
             </thead>
             <tbody>
@@ -317,6 +386,11 @@ function OpportunitiesPageContent() {
                         <StageBadge stage={opp.stage} />
                       </td>
                       <td className="px-4 py-3">
+                        {opp.health
+                          ? <HealthBadge health={opp.health as Health} />
+                          : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="px-4 py-3">
                         <NextActionCell opp={opp} />
                       </td>
                       <td className="px-4 py-3">
@@ -331,6 +405,9 @@ function OpportunitiesPageContent() {
                       )}
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         {opp.owner.name}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        {opp.designEngineer?.name ?? <span className="opacity-50">—</span>}
                       </td>
                     </tr>
                   );

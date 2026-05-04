@@ -16,6 +16,9 @@ import {
 } from "@solaroo/types";
 import { LinkedDocsSection } from "@/components/documents/linked-docs-section";
 import { LinkedContractsSection } from "@/components/contracts/linked-contracts-section";
+import { ActivityTimeline } from "@/components/activities/activity-timeline";
+import { NextActionPanel as StructuredNextActionPanel } from "@/components/opportunities/next-action-panel";
+import { HealthBadge, type Health } from "@/components/opportunities/health-badge";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -484,6 +487,7 @@ export default function OpportunityDetailPage() {
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-semibold">{opp.title}</h1>
             <StageBadge stage={opp.stage} />
+            {opp.health && <HealthBadge health={opp.health as Health} size="md" />}
           </div>
           <p className="text-sm font-mono text-muted-foreground">{opp.opportunityCode}</p>
           <div className="flex gap-4 text-sm text-muted-foreground">
@@ -559,7 +563,24 @@ export default function OpportunityDetailPage() {
         <div className="grid gap-6 md:grid-cols-2">
           {/* Next Action panel — spans full width, shown prominently */}
           <div className="md:col-span-2">
-            <NextActionPanel opp={opp} onUpdated={setOpp} />
+            <StructuredNextActionPanel
+              opp={{
+                id: opp.id,
+                ownerUserId: opp.owner.id,
+                nextAction: opp.nextAction,
+                nextActionType: opp.nextActionType,
+                nextActionDueDate: opp.nextActionDueDate,
+                nextActionOwnerId: opp.nextActionOwnerId,
+                nextActionStatus: opp.nextActionStatus,
+                effectiveNextActionStatus: opp.effectiveNextActionStatus,
+              }}
+              onUpdated={(u) => setOpp({ ...opp, ...u } as OpportunityDetail)}
+            />
+
+            {/* Activity timeline — manual sales touchpoints */}
+            <div className="md:col-span-2">
+              <ActivityTimeline opportunityId={opp.id} />
+            </div>
           </div>
 
           <div className="rounded-lg border bg-card p-5">
@@ -568,7 +589,8 @@ export default function OpportunityDetailPage() {
               <Field label="Commercial Model" value={opp.commercialModel ? COMMERCIAL_MODEL_LABELS[opp.commercialModel] : null} />
               <Field label="Estimated Value" value={formatMYR(opp.estimatedValue)} />
               <Field label="Expected Award" value={opp.expectedAwardDate ? new Date(opp.expectedAwardDate).toLocaleDateString("en-MY", { day: "numeric", month: "long", year: "numeric" }) : null} />
-              <Field label="Owner" value={opp.owner.name} />
+              <Field label="Owner (Sales)"   value={opp.owner.name} />
+              <Field label="Design Engineer" value={opp.designEngineer?.name ?? null} />
               {opp.lostReason && <Field label="Lost Reason" value={opp.lostReason} />}
             </dl>
           </div>
