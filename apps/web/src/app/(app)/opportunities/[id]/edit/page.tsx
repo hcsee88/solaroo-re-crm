@@ -22,6 +22,7 @@ const DESIGN_ROLES = new Set(["DESIGN_ENGINEER", "DESIGN_LEAD"]);
 
 type FormState = {
   title: string;
+  siteId: string;
   ownerUserId: string;
   designEngineerId: string;
   commercialModel: string;
@@ -44,13 +45,14 @@ export default function EditOpportunityPage() {
   const { id } = useParams<{ id: string }>();
 
   const [form, setForm] = useState<FormState>({
-    title: "", ownerUserId: "", designEngineerId: "", commercialModel: "",
+    title: "", siteId: "", ownerUserId: "", designEngineerId: "", commercialModel: "",
     estimatedValue: "", estimatedPvKwp: "", estimatedBessKw: "", estimatedBessKwh: "",
     probabilityPercent: "", expectedAwardDate: "", summary: "", risks: "", competitors: "",
     nextAction: "", nextActionDueDate: "", lastStatusNote: "",
   });
   const [opp, setOpp] = useState<OpportunityDetail | null>(null);
   const [users, setUsers] = useState<UserOption[]>([]);
+  const [accountSites, setAccountSites] = useState<SiteListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -66,6 +68,7 @@ export default function EditOpportunityPage() {
         setUsers(u);
         setForm({
           title: o.title,
+          siteId: o.siteId,
           ownerUserId: o.ownerUserId,
           designEngineerId: o.designEngineerId ?? "",
           commercialModel: o.commercialModel ?? "",
@@ -84,7 +87,12 @@ export default function EditOpportunityPage() {
           nextActionDueDate: o.nextActionDueDate ? o.nextActionDueDate.slice(0, 10) : "",
           lastStatusNote: o.lastStatusNote ?? "",
         });
+        // Load all active sites for this opportunity's account so the user can re-tag
+        return get<PaginatedResult<SiteListItem>>(
+          `/sites?accountId=${o.accountId}&pageSize=200&isActive=true&sortBy=name&sortDir=asc`,
+        );
       })
+      .then((r) => { if (r) setAccountSites(r.items); })
       .catch((err) => setServerError(err instanceof Error ? err.message : "Failed to load opportunity"))
       .finally(() => setLoading(false));
   }, [id]);
@@ -97,6 +105,7 @@ export default function EditOpportunityPage() {
   function validate(): boolean {
     const errs: Record<string, string> = {};
     if (!form.title.trim()) errs.title = "Title is required";
+    if (!form.siteId) errs.siteId = "Site is required";
     if (!form.ownerUserId) errs.ownerUserId = "Owner is required";
     if (form.probabilityPercent) {
       const p = parseInt(form.probabilityPercent);
@@ -114,6 +123,7 @@ export default function EditOpportunityPage() {
     try {
       await patch(`/opportunities/${id}`, {
         title: form.title.trim(),
+        siteId: form.siteId,
         ownerUserId: form.ownerUserId,
         designEngineerId: form.designEngineerId || null,
         commercialModel: form.commercialModel || undefined,
@@ -179,17 +189,41 @@ export default function EditOpportunityPage() {
         <p className="text-sm text-muted-foreground font-mono">{opp?.opportunityCode}</p>
       </div>
 
-      {/* Read-only context */}
-      <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm">
-        <span className="text-muted-foreground">Account: </span>
-        <Link href={`/accounts/${opp?.account.id}`} className="font-medium hover:text-primary hover:underline">
-          {opp?.account.name}
-        </Link>
-        <span className="mx-3 text-border">|</span>
-        <span className="text-muted-foreground">Site: </span>
-        <Link href={`/sites/${opp?.site.id}`} className="font-medium hover:text-primary hover:underline">
-          {opp?.site.name}
-        </Link>
+      {/* Account (read-only) + Site (editable) */}
+      <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm space-y-3">
+        <div>
+          <span className="text-muted-foreground">Account: </span>
+          <Link href={`/accounts/${opp?.account.id}`} className="font-medium hover:text-primary hover:underline">
+            {opp?.account.name}
+          </Link>
+          <span className="ml-2 text-xs text-muted-foreground">(account cannot be changed; create a new opportunity to switch accounts)</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <label htmlFor="siteId" className="text-muted-foreground shrink-0">Site:</label>
+          <select
+            id="siteId"
+            value={form.siteId}
+            onChange={(e) => set("siteId", e.target.value)}
+            className={`flex-1 h-9 rounded-md border bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring ${errors.siteId ? "border-destructive" : "border-input"}`}
+          >
+            <option value="">— Select site —</option>
+            {accountSites.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}{s.siteCode ? ` (${s.siteCode})` : ""}
+              </option>
+            ))}
+          </select>
+          {opp?.site.id && (
+            <Link
+              href={`/sites/${opp.site.id}`}
+              className="text-xs text-primary hover:underline shrink-0"
+              title="Open current site"
+            >
+              View
+            </Link>
+          )}
+        </div>
+        {errors.siteId && <p className="text-xs text-destructive">{errors.siteId}</p>}
       </div>
 
       {serverError && (
