@@ -19,6 +19,7 @@ import { InvoicesPanel } from "@/components/contracts/invoices-panel";
 import { VariancePanel } from "@/components/contracts/variance-panel";
 import { LinkedDocsSection } from "@/components/documents/linked-docs-section";
 import { AuditTrail } from "@/components/audit/audit-trail";
+import { EditMetaPill } from "@/components/audit/edit-meta-pill";
 
 // ─── Types (mirror backend ContractDetail) ────────────────────────────────────
 
@@ -246,6 +247,7 @@ export default function ContractDetailPage({ params }: { params: Promise<{ id: s
               </>
             )}
           </div>
+          <EditMetaPill resource="contract" resourceId={c.id} className="mt-1.5" />
         </div>
         <div className="flex gap-2">
           {canMarkAwarded && (

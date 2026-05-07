@@ -19,6 +19,7 @@ import { LinkedContractsSection } from "@/components/contracts/linked-contracts-
 import { ActivityTimeline } from "@/components/activities/activity-timeline";
 import { NextActionPanel as StructuredNextActionPanel } from "@/components/opportunities/next-action-panel";
 import { HealthBadge, type Health } from "@/components/opportunities/health-badge";
+import { EditMetaPill } from "@/components/audit/edit-meta-pill";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -495,6 +496,7 @@ export default function OpportunityDetailPage() {
             <span>·</span>
             <Link href={`/sites/${opp.site.id}`} className="hover:text-primary hover:underline">{opp.site.name}</Link>
           </div>
+          <EditMetaPill resource="opportunity" resourceId={opp.id} />
         </div>
         <div className="flex gap-2">
           {canTransition && (

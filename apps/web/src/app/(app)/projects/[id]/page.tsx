@@ -7,6 +7,7 @@ import { get, patch } from "@/lib/api-client";
 import { CheckCircle2, Circle, Clock, XCircle, ChevronRight, AlertCircle, Flag, X } from "lucide-react";
 import { LinkedDocsSection } from "@/components/documents/linked-docs-section";
 import { AuditTrail } from "@/components/audit/audit-trail";
+import { EditMetaPill } from "@/components/audit/edit-meta-pill";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -776,6 +777,7 @@ export default function ProjectDetailPage() {
               </>
             )}
           </div>
+          <EditMetaPill resource="project" resourceId={project.id} className="mt-1.5" />
         </div>
         <Link
           href={`/projects/${project.id}/edit`}

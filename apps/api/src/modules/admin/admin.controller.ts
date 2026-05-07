@@ -44,6 +44,25 @@ export class AdminController {
     return this.audit.findAll(query);
   }
 
+  // GET /api/admin/audit/edit-meta?resource=opportunity&resourceId=cuid
+  // Lightweight per-record "Created by / Last edited by" lookup for detail-page
+  // headers. No RequirePermission gate — any authenticated user viewing the
+  // record can see who created/edited it (the resource itself is already gated
+  // by its own module's permissions).
+  @Get('audit/edit-meta')
+  getEditMeta(
+    @Query('resource') resource: string,
+    @Query('resourceId') resourceId: string,
+  ): Promise<{
+    createdBy: { id: string; name: string } | null;
+    createdAt: Date | null;
+    lastEditedBy: { id: string; name: string } | null;
+    lastEditedAt: Date | null;
+    lastEditedAction: string | null;
+  }> {
+    return this.audit.getEditMeta(resource, resourceId);
+  }
+
   // GET /api/admin/users/dropdown
   // No permission gate — any authenticated user can fetch users for select widgets.
   // Returns id, name, email, roleName only. Active users only.

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { get, post, patch } from "@/lib/api-client";
+import { EditMetaPill } from "@/components/audit/edit-meta-pill";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -881,6 +882,7 @@ export default function ProposalDetailPage() {
             {latestVersion && <StatusBadge status={latestVersion.approvalStatus} />}
           </div>
           <h1 className="text-2xl font-semibold">{proposal.title}</h1>
+          <EditMetaPill resource="proposal" resourceId={proposal.id} className="mt-1.5" />
         </div>
 
         {canCreateNewVersion && (

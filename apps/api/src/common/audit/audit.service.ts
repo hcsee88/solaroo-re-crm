@@ -109,4 +109,48 @@ export class AuditService {
       totalPages: Math.max(1, Math.ceil(total / opts.pageSize)),
     };
   }
+
+  // ─── Edit-meta helpers ──────────────────────────────────────────────────────
+  // Used by detail pages to render "Created by X · 2026-04-23" + "Last edited by
+  // Y · 18 minutes ago". Both come from the same audit_logs table — no schema
+  // changes needed on the resource tables.
+
+  async getCreatedBy(resource: string, resourceId: string): Promise<{ user: { id: string; name: string } | null; at: Date } | null> {
+    const row = await this.prisma.auditLog.findFirst({
+      where: { resource, resourceId, action: 'created' },
+      orderBy: { performedAt: 'asc' },
+      select: { performedAt: true, user: { select: { id: true, name: true } } },
+    });
+    return row ? { user: row.user, at: row.performedAt } : null;
+  }
+
+  async getLastEdit(resource: string, resourceId: string): Promise<{ user: { id: string; name: string } | null; at: Date; action: string } | null> {
+    const row = await this.prisma.auditLog.findFirst({
+      where: { resource, resourceId },
+      orderBy: { performedAt: 'desc' },
+      select: { performedAt: true, action: true, user: { select: { id: true, name: true } } },
+    });
+    return row ? { user: row.user, at: row.performedAt, action: row.action } : null;
+  }
+
+  /** Combined fetch for the detail-page "edit meta" pill — single round trip. */
+  async getEditMeta(resource: string, resourceId: string): Promise<{
+    createdBy: { id: string; name: string } | null;
+    createdAt: Date | null;
+    lastEditedBy: { id: string; name: string } | null;
+    lastEditedAt: Date | null;
+    lastEditedAction: string | null;
+  }> {
+    const [created, last] = await Promise.all([
+      this.getCreatedBy(resource, resourceId),
+      this.getLastEdit(resource, resourceId),
+    ]);
+    return {
+      createdBy:        created?.user ?? null,
+      createdAt:        created?.at ?? null,
+      lastEditedBy:     last?.user ?? null,
+      lastEditedAt:     last?.at ?? null,
+      lastEditedAction: last?.action ?? null,
+    };
+  }
 }
