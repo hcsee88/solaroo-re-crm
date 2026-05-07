@@ -1,0 +1,168 @@
+Solaroo RE CRM — Dev Log — 2026-05-07
+======================================
+
+Long session. Major outcomes, in chronological order:
+
+1. NEW WRITTEN ARTEFACTS
+   - dev_log/Solaroo_Sales_Pipeline_Onboarding.docx — standalone sales-onboarding
+     guide for new hires (12 sections: workflow, types, dashboard, do's/don'ts,
+     quick-reference card). Generator: dev_log/build_sales_guide.py (stdlib only,
+     no python-docx dep).
+   - dev_log/Solaroo_CRM_Flowcharts.pptx — 10-slide visual deck of the full
+     Account → Site → Opportunity → Proposal → Contract → Project → Procurement
+     → Commissioning → O&M lifecycle. Includes swim-lane diagrams, gate state
+     machine, RAG/blocker flow, role-visibility matrix, notification-trigger map.
+     Generator: dev_log/build_flowcharts.py (python-pptx).
+       BUG-DEBUG NOTES (took 2 attempts to ship a clean .pptx):
+         (1) Hand-rolled <a:tailEnd> arrowhead XML appended after python-pptx's
+             auto-children → broke OOXML schema order → "PowerPoint repaired"
+             prompt. Fix: rewrote arrow helper to clear and re-add all <a:ln>
+             children in correct order (solidFill → prstDash → round → tailEnd).
+         (2) Width calcs like (total_w - gap*(n-1))/n produced FLOAT EMUs
+             (e.g. cx="91440.0", x="1557832.7777") — OOXML requires integer
+             EMUs. Monkey-patched SlideShapes.add_shape / add_textbox /
+             add_connector to coerce to int. Verified zero float coords remain.
+   - dev_log/Solaroo_RE_CRM_Onboarding.docx — appended Section 6 "Sales
+     Pipeline Discipline (V1)" with 13 sub-sections. Preserves all original
+     styles + TOC. After regen, user must Word right-click TOC → Update Field.
+     Append script: dev_log/update_onboarding.py.
+
+2. OPPORTUNITY → DESIGN ENGINEER ASSIGNMENT
+   - Schema: added designEngineerId (optional, FK to User) on Opportunity +
+     designEngineer relation. Inverse relation on User.
+       packages/db/prisma/schema/crm.prisma
+       packages/db/prisma/schema/auth.prisma
+   - DTOs: extended Create/Update/Query schemas with designEngineerId +
+     mineAsDesignEngineer filter chip.
+   - Service: extended scope='assigned' to include design-engineer link;
+     responses now include designEngineer { id, name, email }.
+   - Frontend: design-engineer dropdown on new + edit forms; new column in
+     opportunity list; "Designed by me" filter chip; design-engineer shown
+     in opportunity detail header.
+   - Schema applied locally via prisma db push.
+   - 4 new test users created via API: salesengineer{2,3}@pekatgroup.com +
+     designengineer{2,3}@pekatgroup.com (all Test@1234). Recorded in
+     dev_log/Test User Credential.txt.
+
+3. SITE TAG MADE EDITABLE ON OPPORTUNITY EDIT PAGE
+   - apps/web/src/app/(app)/opportunities/[id]/edit/page.tsx
+   - Account stays read-only (avoids breaking cascading site/contact links);
+     site is now a dropdown of all active sites under the opportunity's
+     account. Backend already accepted siteId in UpdateOpportunitySchema.
+
+4. OPPORTUNITY EDIT BUG FIX — every save was failing with HTTP 400
+   - Root cause: nextAction / nextActionDueDate / lastStatusNote were
+     declared .optional() but not .nullable() in UpdateOpportunitySchema.
+     Frontend edit form sends `null` when fields are blank, which Zod
+     rejected → BadRequestException → 400.
+   - Secondary bug: in opportunities.service.ts, the date ternary
+     `dto.nextActionDueDate ? new Date(...) : undefined` mapped null →
+     undefined (no-op), so even after the schema was fixed, clearing a date
+     wouldn't actually clear the column.
+   - Fix: added .nullable() to the 5 V1 tracking fields; rewrote date
+     mappers as 3-way (null → null, undefined → undefined, string → parse).
+   - Verified end-to-end: PATCH with nulls returns 200 and persists null;
+     PATCH that sets values, then re-PATCH that clears, both work.
+
+5. RAILWAY AUTO-DEPLOY RECONNECTED + DOCKERFILE HARDENED
+   - Discovered after a push that Railway hadn't auto-deployed since
+     2026-04-25. Root cause: Auto deploy was DISABLED on both API and Web
+     services (visible in Railway → Settings → Source). User re-enabled.
+   - Triggered redeploy via empty commit (commit 23376bd) — both services
+     picked it up.
+   - Then opportunities list went 500: error logs showed
+     `column opportunities.designEngineerId does not exist`. Root cause:
+     production startup used `prisma migrate deploy` and no migration file
+     existed for our new column. Schema diverged → API queries failed.
+   - FIX (commit fee0851):
+     Replaced Dockerfile.api startup CMD:
+       OLD: prisma migrate deploy ... || echo skipped
+       NEW: prisma db push --skip-generate (no --accept-data-loss)
+     Behaviour:
+       - Adds new columns/tables/indexes silently       ✓
+       - REFUSES & exits non-zero on destructive change ✓
+         (column drop, type narrowing, NOT-NULL without default…)
+     Combined with the seed script (idempotent upsert only on roles/perms/
+     test users — never touches business data), business data CANNOT be
+     wiped by a normal deploy. To do a destructive change, an operator
+     must run db push --accept-data-loss manually outside the container.
+   - Deploy fee0851 logs confirm:
+       "🚀 Your database is now in sync with your Prisma schema. Done in 286ms"
+       "✓ 14 roles seeded ... ✓ 13 test users seeded"
+     → Missing designEngineerId (and other additive sales-pipeline cols)
+     were applied automatically on container start. Existing rows untouched.
+     User's opportunities became visible again.
+
+6. AUDIT v2 — auto-capture + "Created by / Last edited by" pill (commit 8c3eb70)
+   - User asked which option was better:
+       A. Add createdBy/updatedBy columns to every business table
+       B. Build a global AuditInterceptor + read from existing AuditLog
+   - Recommended B (no schema risk, lower engineering cost, future-proof).
+   - Implementation (~90 min):
+     • apps/api/src/common/audit/audit.interceptor.ts (new, ~120 lines)
+       - NestJS APP_INTERCEPTOR registered globally via AuditModule
+       - Auto-records every successful POST /api/{resource}  → 'created'
+                                       PATCH /api/{resource}/:id → 'updated'
+       - Top-level routes only — sub-routes (transitions, approvals) deliberately
+         skipped because services already audit those with rich metadata
+       - Routes covered: opportunity, account, site, contact, project,
+         contract, proposal, proposal_version, activity
+       - Captures: actor.id, resource, resourceId, action, metadata.fields
+         (list of submitted field names — not values, to keep audit log lean)
+     • apps/api/src/common/audit/audit.service.ts
+       - getCreatedBy(resource, resourceId) — first audit_logs row with action='created'
+       - getLastEdit(resource, resourceId) — most recent audit_logs row
+       - getEditMeta(resource, resourceId) — combined fetch in single round trip
+     • apps/api/src/modules/admin/admin.controller.ts
+       - GET /api/admin/audit/edit-meta?resource=&resourceId= → no permission
+         gate (the resource itself is already gated by its own module's perms)
+     • apps/web/src/components/audit/edit-meta-pill.tsx (new, ~85 lines)
+       - Renders "Created by X · 23 Apr 2026 · Last edited by Y · 18 minutes ago"
+       - Silent on error — never blocks the page
+     • Wired into 4 detail page headers: opportunities, projects, contracts,
+       proposals
+   - Honest caveats noted in commit:
+       - Existing pre-interceptor records have no creator entry (history
+         starts now)
+       - No oldValue/newValue diff captured for plain edits yet (only field
+         names list); state transitions still capture rich diff via existing
+         service-layer audit calls
+       - Sub-routes deliberately skipped to avoid double-audit
+   - Storage estimate: <1k rows/day at current team size (15→30 users) —
+     trivial for Postgres.
+
+7. PUSHES TO MAIN
+     853969d  feat(opportunities): make Site tag editable
+     23376bd  chore: trigger Railway redeploy after auto-deploy re-enabled
+     fee0851  fix(deploy): use prisma db push (no --accept-data-loss)
+     8c3eb70  feat(audit): auto-capture create/update + EditMetaPill
+   All deploys SUCCESS on Railway (API service id 948a6a93-...), auto-deploy
+   confirmed working again on every push to main.
+
+8. PERMISSIONS UPDATE
+   Added Bash(git push:*) to .claude/settings.local.json allow list at
+   user request, so I can push directly without per-prompt approval.
+
+OUTCOMES VS USER PROMPTS
+- "make the site tag editable"           → done (commit 853969d)
+- "fix opportunity section can't be modified" → done (commit 853969d included)
+- "push to github"                        → done (× multiple)
+- "ensure data not wiped on push"         → done (Dockerfile.api fee0851)
+- "create test users for SE + DE"         → done (4 users via API)
+- "tell me about all the database"        → answered (single Postgres,
+                                              66 tables across 9 schema files)
+- "do we save createdBy/updatedBy info"   → answered + acted: built audit
+                                              interceptor + EditMetaPill
+- "reason which option suit me best"      → recommended B with reasoning
+- "go ahead"                              → shipped commit 8c3eb70
+
+DEFERRED / NEXT
+- Phase 2 audit: capture oldValue/newValue per field for plain edits
+  (requires reading record before each PATCH; ~2 hrs additional)
+- Extend interceptor ROUTES to: documents, vendors, RFQs, POs, deliveries,
+  assets, maintenance — currently audited only when their service-layer
+  code explicitly calls auditService.record()
+- Worker service is still local-only; not yet on Railway
+- /admin/audit page could surface "edit-meta" lookups in a side panel
+- Once volume grows, consider a "lastEditedAt" denormalized column on
+  hot list pages (opportunity / project list) to avoid N audit_logs joins
