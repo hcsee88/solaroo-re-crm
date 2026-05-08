@@ -90,6 +90,7 @@ export const PERMISSION_DEFS: PermissionDef[] = [
   { resource: 'proposal', action: 'edit',    scope: 'all',      roles: ['DIRECTOR'] },
   { resource: 'proposal', action: 'edit',    scope: 'team',     roles: ['SALES_MANAGER'] },
   { resource: 'proposal', action: 'edit',    scope: 'own',      roles: ['SALES_ENGINEER'] },
+  { resource: 'proposal', action: 'delete',  scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER'] },
   { resource: 'proposal', action: 'submit',  scope: 'own',      roles: ['SALES_ENGINEER'] },
   { resource: 'proposal', action: 'submit',  scope: 'team',     roles: ['SALES_MANAGER'] },
   { resource: 'proposal', action: 'approve', scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER'] },

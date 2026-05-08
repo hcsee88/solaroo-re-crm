@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
@@ -63,6 +64,19 @@ export class ProposalsController {
     @CurrentUser() user: UserContext,
   ): Promise<ProposalDetail> {
     return this.proposalsService.create(dto, user);
+  }
+
+  // ─── Delete the whole proposal ────────────────────────────────────────────
+  // Refused at service level if any version is APPROVED.
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('proposal', 'delete')
+  delete(
+    @Param('id') id: string,
+    @CurrentUser() user: UserContext,
+  ): Promise<{ ok: true }> {
+    return this.proposalsService.delete(id, user);
   }
 
   // ─── Add a new version (cloned / new draft) ───────────────────────────────

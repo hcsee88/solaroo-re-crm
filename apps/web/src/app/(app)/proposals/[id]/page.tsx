@@ -2,9 +2,10 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { get, post, patch } from "@/lib/api-client";
+import { useParams, useRouter } from "next/navigation";
+import { get, post, patch, del } from "@/lib/api-client";
 import { EditMetaPill } from "@/components/audit/edit-meta-pill";
+import { DeleteConfirmDialog } from "@/components/common/delete-confirm-dialog";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -808,10 +809,12 @@ function VersionCard({
 
 export default function ProposalDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [proposal,            setProposal]            = useState<ProposalDetail | null>(null);
   const [loading,             setLoading]             = useState(true);
   const [error,               setError]               = useState<string | null>(null);
   const [showNewVersionModal, setShowNewVersionModal] = useState(false);
+  const [showDelete,          setShowDelete]          = useState(false);
 
   const fetchProposal = useCallback(async () => {
     setLoading(true);
@@ -885,15 +888,37 @@ export default function ProposalDetailPage() {
           <EditMetaPill resource="proposal" resourceId={proposal.id} className="mt-1.5" />
         </div>
 
-        {canCreateNewVersion && (
+        <div className="flex flex-shrink-0 gap-2">
+          {canCreateNewVersion && (
+            <button
+              onClick={() => setShowNewVersionModal(true)}
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"
+            >
+              + New Version
+            </button>
+          )}
           <button
-            onClick={() => setShowNewVersionModal(true)}
-            className="flex-shrink-0 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"
+            type="button"
+            onClick={() => setShowDelete(true)}
+            className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-red-50"
+            style={{ color: "#e2445c", borderColor: "#f5c6cb" }}
           >
-            + New Version
+            Delete
           </button>
-        )}
+        </div>
       </div>
+
+      <DeleteConfirmDialog
+        open={showDelete}
+        resourceLabel="Proposal"
+        confirmText={proposal.proposalCode}
+        description={`Permanently deletes "${proposal.title}" and all its versions, assumption sets, and approval records. Refused if any version has been APPROVED.`}
+        onConfirm={async () => {
+          await del(`/proposals/${id}`);
+          router.push("/proposals");
+        }}
+        onClose={() => setShowDelete(false)}
+      />
 
       {/* Status attention banner */}
       {activeVersion && <StatusBanner version={activeVersion} />}

@@ -398,6 +398,56 @@ export class ProposalsService {
     return this.findById(p.id, user);
   }
 
+  // ── Delete proposal ───────────────────────────────────────────────────────
+  // Refuses if any version is APPROVED (would corrupt commercial audit trail).
+  // Otherwise cascades all versions, assumption sets, and approval records.
+
+  async delete(proposalId: string, user: UserContext): Promise<{ ok: true }> {
+    const proposal = await this.prisma.proposal.findUnique({
+      where: { id: proposalId },
+      select: {
+        id: true,
+        proposalCode: true,
+        versions: {
+          select: { id: true, versionNo: true, approvalStatus: true },
+        },
+      },
+    });
+    if (!proposal) throw new NotFoundException(`Proposal ${proposalId} not found`);
+
+    // Scope check via opportunity ownership — re-use findById which enforces it.
+    await this.findById(proposalId, user);
+
+    const approvedVersions = proposal.versions.filter((v) => v.approvalStatus === 'APPROVED');
+    if (approvedVersions.length > 0) {
+      const labels = approvedVersions.map((v) => `v${v.versionNo}`).join(', ');
+      throw new BadRequestException(
+        `Cannot delete proposal ${proposal.proposalCode} — version ${labels} ${approvedVersions.length === 1 ? 'is' : 'are'} APPROVED. Approved proposals are immutable. Create a new proposal version instead, or archive at the opportunity level.`,
+      );
+    }
+
+    const versionIds = proposal.versions.map((v) => v.id);
+
+    await this.prisma.$transaction([
+      // Delete all approvals tied to this proposal's versions
+      this.prisma.proposalApproval.deleteMany({
+        where: { proposalVersionId: { in: versionIds } },
+      }),
+      // Delete frozen assumption sets
+      this.prisma.proposalAssumptionSet.deleteMany({
+        where: { proposalVersionId: { in: versionIds } },
+      }),
+      // Delete versions themselves
+      this.prisma.proposalVersion.deleteMany({
+        where: { proposalId },
+      }),
+      // Finally, delete the proposal
+      this.prisma.proposal.delete({ where: { id: proposalId } }),
+    ]);
+
+    return { ok: true };
+  }
+
   // ── Create new version ───────────────────────────────────────────────────
 
   async createVersion(
