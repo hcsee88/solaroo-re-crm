@@ -310,6 +310,39 @@ export class AccountsService {
     return account as AccountDetail;
   }
 
+  // ─── Delete ────────────────────────────────────────────────────────────────
+  // Hard-delete an account. Refuses if any sites/opportunities/projects/contacts
+  // reference it — caller must clear them first. Protects audit history.
+
+  async delete(id: string, user: UserContext): Promise<{ ok: true }> {
+    const scopeFilter = await this.buildScopeFilter(user, 'edit');
+    const existing = await this.prisma.account.findFirst({
+      where: { id, ...scopeFilter },
+      select: {
+        id: true,
+        accountCode: true,
+        _count: {
+          select: { sites: true, contacts: true, opportunities: true, projects: true },
+        },
+      },
+    });
+    if (!existing) throw new NotFoundException(`Account ${id} not found`);
+
+    const blockers: string[] = [];
+    if (existing._count.opportunities > 0) blockers.push(`${existing._count.opportunities} opportunit${existing._count.opportunities === 1 ? 'y' : 'ies'}`);
+    if (existing._count.projects      > 0) blockers.push(`${existing._count.projects} project${existing._count.projects === 1 ? '' : 's'}`);
+    if (existing._count.sites         > 0) blockers.push(`${existing._count.sites} site${existing._count.sites === 1 ? '' : 's'}`);
+    if (existing._count.contacts      > 0) blockers.push(`${existing._count.contacts} contact link${existing._count.contacts === 1 ? '' : 's'}`);
+    if (blockers.length > 0) {
+      throw new BadRequestException(
+        `Cannot delete account ${existing.accountCode} — still referenced by ${blockers.join(', ')}. Remove them first.`,
+      );
+    }
+
+    await this.prisma.account.delete({ where: { id } });
+    return { ok: true };
+  }
+
   // ─── Code generator ────────────────────────────────────────────────────────
 
   private async generateAccountCode(): Promise<string> {

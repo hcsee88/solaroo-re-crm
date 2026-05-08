@@ -324,6 +324,35 @@ export class SitesService {
     return site as SiteDetail;
   }
 
+  // ─── Delete ────────────────────────────────────────────────────────────────
+  // Hard-delete a site. Refuses if any opportunities/projects/assets reference it.
+
+  async delete(id: string, user: UserContext): Promise<{ ok: true }> {
+    const scopeFilter = await this.buildScopeFilter(user, 'edit');
+    const existing = await this.prisma.site.findFirst({
+      where: { id, ...scopeFilter },
+      select: {
+        id: true,
+        siteCode: true,
+        _count: { select: { opportunities: true, projects: true, assets: true } },
+      },
+    });
+    if (!existing) throw new NotFoundException(`Site ${id} not found`);
+
+    const blockers: string[] = [];
+    if (existing._count.opportunities > 0) blockers.push(`${existing._count.opportunities} opportunit${existing._count.opportunities === 1 ? 'y' : 'ies'}`);
+    if (existing._count.projects      > 0) blockers.push(`${existing._count.projects} project${existing._count.projects === 1 ? '' : 's'}`);
+    if (existing._count.assets        > 0) blockers.push(`${existing._count.assets} asset${existing._count.assets === 1 ? '' : 's'}`);
+    if (blockers.length > 0) {
+      throw new BadRequestException(
+        `Cannot delete site ${existing.siteCode} — still referenced by ${blockers.join(', ')}. Remove them first.`,
+      );
+    }
+
+    await this.prisma.site.delete({ where: { id } });
+    return { ok: true };
+  }
+
   // ─── Code generator ────────────────────────────────────────────────────────
 
   private async generateSiteCode(): Promise<string> {

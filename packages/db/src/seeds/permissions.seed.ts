@@ -19,6 +19,7 @@ export const PERMISSION_DEFS: PermissionDef[] = [
   { resource: 'account', action: 'create', scope: 'own',      roles: ['SALES_ENGINEER'] },
   { resource: 'account', action: 'edit',   scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER'] },
   { resource: 'account', action: 'edit',   scope: 'own',      roles: ['SALES_ENGINEER'] },
+  { resource: 'account', action: 'delete', scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER'] },
   { resource: 'account', action: 'export', scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER'] },
 
   // ─── Contacts ──────────────────────────────────────────────────────────────
@@ -29,6 +30,7 @@ export const PERMISSION_DEFS: PermissionDef[] = [
   { resource: 'contact', action: 'create', scope: 'own',      roles: ['SALES_ENGINEER'] },
   { resource: 'contact', action: 'edit',   scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER'] },
   { resource: 'contact', action: 'edit',   scope: 'own',      roles: ['SALES_ENGINEER'] },
+  { resource: 'contact', action: 'delete', scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER'] },
 
   // ─── Sites ─────────────────────────────────────────────────────────────────
   { resource: 'site', action: 'view',   scope: 'all',      roles: ['DIRECTOR', 'PMO_MANAGER', 'SALES_MANAGER', 'DESIGN_LEAD', 'FINANCE_ADMIN'] },
@@ -38,6 +40,7 @@ export const PERMISSION_DEFS: PermissionDef[] = [
   { resource: 'site', action: 'create', scope: 'own',      roles: ['SALES_ENGINEER'] },
   { resource: 'site', action: 'edit',   scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER'] },
   { resource: 'site', action: 'edit',   scope: 'own',      roles: ['SALES_ENGINEER'] },
+  { resource: 'site', action: 'delete', scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER'] },
   { resource: 'site', action: 'export', scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER'] },
 
   // ─── Opportunities ─────────────────────────────────────────────────────────
@@ -50,6 +53,7 @@ export const PERMISSION_DEFS: PermissionDef[] = [
   { resource: 'opportunity', action: 'edit',    scope: 'all',      roles: ['DIRECTOR'] },
   { resource: 'opportunity', action: 'edit',    scope: 'team',     roles: ['SALES_MANAGER'] },
   { resource: 'opportunity', action: 'edit',    scope: 'own',      roles: ['SALES_ENGINEER'] },
+  { resource: 'opportunity', action: 'delete',  scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER'] },
   { resource: 'opportunity', action: 'submit',  scope: 'own',      roles: ['SALES_ENGINEER'] },
   { resource: 'opportunity', action: 'submit',  scope: 'team',     roles: ['SALES_MANAGER'] },
   { resource: 'opportunity', action: 'approve', scope: 'all',      roles: ['DIRECTOR', 'SALES_MANAGER'] },

@@ -375,6 +375,25 @@ export class ContactsService {
     return contact as ContactDetail;
   }
 
+  // ─── Delete ────────────────────────────────────────────────────────────────
+  // Hard-delete a contact AND all its account-link rows (M2M cascade is manual).
+
+  async delete(id: string, user: UserContext): Promise<{ ok: true }> {
+    const scopeFilter = await this.buildScopeFilter(user, 'edit');
+    const existing = await this.prisma.contact.findFirst({
+      where: { id, ...scopeFilter },
+      select: { id: true },
+    });
+    if (!existing) throw new NotFoundException(`Contact ${id} not found`);
+
+    await this.prisma.$transaction([
+      this.prisma.accountContact.deleteMany({ where: { contactId: id } }),
+      this.prisma.contact.delete({ where: { id } }),
+    ]);
+
+    return { ok: true };
+  }
+
   // ─── Update account link ───────────────────────────────────────────────────
 
   async updateAccountLink(

@@ -59,6 +59,16 @@ export class ContactsController {
     return this.contactsService.update(id, dto, user);
   }
 
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('contact', 'delete')
+  delete(
+    @Param('id') id: string,
+    @CurrentUser() user: UserContext,
+  ): Promise<{ ok: true }> {
+    return this.contactsService.delete(id, user);
+  }
+
   @Patch(':id/accounts/:accountId')
   @RequirePermission('contact', 'edit')
   @HttpCode(HttpStatus.OK)

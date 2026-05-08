@@ -2,11 +2,12 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { get, patch } from "@/lib/api-client";
+import { useParams, useRouter } from "next/navigation";
+import { get, patch, del } from "@/lib/api-client";
 import type { AccountDetail, AccountType, ContactListItem, PaginatedResult } from "@solaroo/types";
 import { ACCOUNT_TYPE_LABELS, ACCOUNT_TYPE_COLOURS } from "@solaroo/types";
 import { ActivityTimeline } from "@/components/activities/activity-timeline";
+import { DeleteConfirmDialog } from "@/components/common/delete-confirm-dialog";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -185,9 +186,11 @@ function AccountContactsTab({ accountId }: { accountId: string }) {
 
 export default function AccountDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showDelete, setShowDelete] = useState(false);
   const [activeTab, setActiveTab] = useState<
     "overview" | "contacts" | "sites" | "opportunities" | "activities"
   >("overview");
@@ -262,13 +265,35 @@ export default function AccountDetailPage() {
             {account.accountCode}
           </p>
         </div>
-        <Link
-          href={`/accounts/${id}/edit`}
-          className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
-        >
-          Edit
-        </Link>
+        <div className="flex gap-2">
+          <Link
+            href={`/accounts/${id}/edit`}
+            className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+          >
+            Edit
+          </Link>
+          <button
+            type="button"
+            onClick={() => setShowDelete(true)}
+            className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-red-50"
+            style={{ color: "#e2445c", borderColor: "#f5c6cb" }}
+          >
+            Delete
+          </button>
+        </div>
       </div>
+
+      <DeleteConfirmDialog
+        open={showDelete}
+        resourceLabel="Account"
+        confirmText={account.accountCode}
+        description={`Permanently deletes "${account.name}". Refused if it has any sites, contacts, opportunities, or projects.`}
+        onConfirm={async () => {
+          await del(`/accounts/${id}`);
+          router.push("/accounts");
+        }}
+        onClose={() => setShowDelete(false)}
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { get } from "@/lib/api-client";
+import { useParams, useRouter } from "next/navigation";
+import { get, del } from "@/lib/api-client";
 import type { ContactDetail } from "@solaroo/types";
+import { DeleteConfirmDialog } from "@/components/common/delete-confirm-dialog";
 
 function Field({ label, value }: { label: string; value: string | null | undefined }) {
   return (
@@ -27,9 +28,11 @@ function Field({ label, value }: { label: string; value: string | null | undefin
 
 export default function ContactDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [contact, setContact] = useState<ContactDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showDelete, setShowDelete] = useState(false);
 
   useEffect(() => {
     get<ContactDetail>(`/contacts/${id}`)
@@ -84,13 +87,35 @@ export default function ContactDetailPage() {
             </p>
           )}
         </div>
-        <Link
-          href={`/contacts/${id}/edit`}
-          className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
-        >
-          Edit
-        </Link>
+        <div className="flex gap-2">
+          <Link
+            href={`/contacts/${id}/edit`}
+            className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+          >
+            Edit
+          </Link>
+          <button
+            type="button"
+            onClick={() => setShowDelete(true)}
+            className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-red-50"
+            style={{ color: "#e2445c", borderColor: "#f5c6cb" }}
+          >
+            Delete
+          </button>
+        </div>
       </div>
+
+      <DeleteConfirmDialog
+        open={showDelete}
+        resourceLabel="Contact"
+        confirmText={`${contact.firstName} ${contact.lastName}`}
+        description="Permanently deletes this contact and all their account links."
+        onConfirm={async () => {
+          await del(`/contacts/${id}`);
+          router.push("/contacts");
+        }}
+        onClose={() => setShowDelete(false)}
+      />
 
       {/* Content */}
       <div className="grid gap-6 md:grid-cols-2">

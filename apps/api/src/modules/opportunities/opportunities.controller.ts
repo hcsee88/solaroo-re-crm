@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
@@ -66,6 +67,16 @@ export class OpportunitiesController {
     @CurrentUser() user: UserContext,
   ): Promise<OpportunityDetail> {
     return this.opportunitiesService.update(id, dto, user);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('opportunity', 'delete')
+  delete(
+    @Param('id') id: string,
+    @CurrentUser() user: UserContext,
+  ): Promise<{ ok: true }> {
+    return this.opportunitiesService.delete(id, user);
   }
 
   // Stage transition — edit permission for most stages; WON requires approve (checked in service)

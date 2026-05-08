@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
@@ -61,5 +62,15 @@ export class AccountsController {
     @CurrentUser() user: UserContext,
   ): Promise<AccountDetail> {
     return this.accountsService.update(id, dto, user);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('account', 'delete')
+  delete(
+    @Param('id') id: string,
+    @CurrentUser() user: UserContext,
+  ): Promise<{ ok: true }> {
+    return this.accountsService.delete(id, user);
   }
 }

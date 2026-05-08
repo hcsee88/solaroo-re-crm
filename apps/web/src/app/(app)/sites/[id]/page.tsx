@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { get } from "@/lib/api-client";
+import { useParams, useRouter } from "next/navigation";
+import { get, del } from "@/lib/api-client";
 import type { SiteDetail, SiteGridCategory } from "@solaroo/types";
 import { SITE_GRID_CATEGORY_LABELS, SITE_GRID_CATEGORY_COLOURS } from "@solaroo/types";
+import { DeleteConfirmDialog } from "@/components/common/delete-confirm-dialog";
 
 function Field({ label, value }: { label: string; value: string | null | undefined }) {
   return (
@@ -27,9 +28,11 @@ function StatCard({ label, value }: { label: string; value: number }) {
 
 export default function SiteDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [site, setSite] = useState<SiteDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showDelete, setShowDelete] = useState(false);
 
   useEffect(() => {
     get<SiteDetail>(`/sites/${id}`)
@@ -74,8 +77,30 @@ export default function SiteDetailPage() {
             {site.account.name}
           </Link>
         </div>
-        <Link href={`/sites/${id}/edit`} className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted">Edit</Link>
+        <div className="flex gap-2">
+          <Link href={`/sites/${id}/edit`} className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted">Edit</Link>
+          <button
+            type="button"
+            onClick={() => setShowDelete(true)}
+            className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-red-50"
+            style={{ color: "#e2445c", borderColor: "#f5c6cb" }}
+          >
+            Delete
+          </button>
+        </div>
       </div>
+
+      <DeleteConfirmDialog
+        open={showDelete}
+        resourceLabel="Site"
+        confirmText={site.siteCode}
+        description={`Permanently deletes "${site.name}". Refused if it has any opportunities, projects, or assets.`}
+        onConfirm={async () => {
+          await del(`/sites/${id}`);
+          router.push("/sites");
+        }}
+        onClose={() => setShowDelete(false)}
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3">

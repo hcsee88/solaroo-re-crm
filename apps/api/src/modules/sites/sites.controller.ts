@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   Query,
@@ -56,5 +57,15 @@ export class SitesController {
     @CurrentUser() user: UserContext,
   ): Promise<SiteDetail> {
     return this.sitesService.update(id, dto, user);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission('site', 'delete')
+  delete(
+    @Param('id') id: string,
+    @CurrentUser() user: UserContext,
+  ): Promise<{ ok: true }> {
+    return this.sitesService.delete(id, user);
   }
 }

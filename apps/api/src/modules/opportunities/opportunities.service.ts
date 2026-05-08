@@ -667,6 +667,44 @@ export class OpportunitiesService {
     });
   }
 
+  // ─── Delete ────────────────────────────────────────────────────────────────
+  // Hard-delete an opportunity. Cascades stage history + members + activities
+  // (junction-style data); refuses if a Project or Proposal already exists for it.
+
+  async delete(id: string, user: UserContext): Promise<{ ok: true }> {
+    // findById enforces scope-based view permission and throws if not found.
+    // We additionally need the 'edit' (or 'delete') scope; the controller
+    // already gates with @RequirePermission('opportunity', 'delete').
+    const existing = await this.prisma.opportunity.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        opportunityCode: true,
+        _count: { select: { proposals: true } },
+        project: { select: { id: true, projectCode: true } },
+      },
+    });
+    if (!existing) throw new NotFoundException(`Opportunity ${id} not found`);
+
+    const blockers: string[] = [];
+    if (existing._count.proposals > 0) blockers.push(`${existing._count.proposals} proposal${existing._count.proposals === 1 ? '' : 's'}`);
+    if (existing.project) blockers.push(`project ${existing.project.projectCode}`);
+    if (blockers.length > 0) {
+      throw new BadRequestException(
+        `Cannot delete opportunity ${existing.opportunityCode} — still referenced by ${blockers.join(', ')}. Mark the opportunity as LOST instead, or delete the dependents first.`,
+      );
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.activity.deleteMany({ where: { opportunityId: id } }),
+      this.prisma.opportunityStageHistory.deleteMany({ where: { opportunityId: id } }),
+      this.prisma.opportunityMember.deleteMany({ where: { opportunityId: id } }),
+      this.prisma.opportunity.delete({ where: { id } }),
+    ]);
+
+    return { ok: true };
+  }
+
   // ─── Code generator ────────────────────────────────────────────────────────
 
   private async generateCode(): Promise<string> {

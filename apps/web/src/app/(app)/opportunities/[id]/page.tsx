@@ -2,8 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { get, post, patch } from "@/lib/api-client";
+import { useParams, useRouter } from "next/navigation";
+import { get, post, patch, del } from "@/lib/api-client";
+import { DeleteConfirmDialog } from "@/components/common/delete-confirm-dialog";
 import type {
   OpportunityDetail,
   OpportunityStageValue,
@@ -446,10 +447,12 @@ function NextActionPanel({
 
 export default function OpportunityDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const [opp, setOpp] = useState<OpportunityDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showTransition, setShowTransition] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "history" | "documents">("overview");
 
   useEffect(() => {
@@ -510,8 +513,28 @@ export default function OpportunityDetailPage() {
           <Link href={`/opportunities/${id}/edit`} className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted">
             Edit
           </Link>
+          <button
+            type="button"
+            onClick={() => setShowDelete(true)}
+            className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-red-50"
+            style={{ color: "#e2445c", borderColor: "#f5c6cb" }}
+          >
+            Delete
+          </button>
         </div>
       </div>
+
+      <DeleteConfirmDialog
+        open={showDelete}
+        resourceLabel="Opportunity"
+        confirmText={opp.opportunityCode}
+        description={`This permanently deletes "${opp.title}" and all its activities & stage history. Cannot be undone.`}
+        onConfirm={async () => {
+          await del(`/opportunities/${id}`);
+          router.push("/opportunities");
+        }}
+        onClose={() => setShowDelete(false)}
+      />
 
       {/* Pipeline bar */}
       <PipelineBar currentStage={opp.stage} />
