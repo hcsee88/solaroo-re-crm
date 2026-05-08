@@ -53,11 +53,18 @@ export type NavHref =
  * Order here = order in the sidebar.
  * SUPER_ADMIN is empty — they see only the Admin section rendered separately.
  */
+// Sales Pipeline Lite (2026-05-08): Sales Pipeline + PMO promoted to the top
+// of the sidebar (just below Dashboard). They are the management-level
+// at-a-glance pages — Director / Sales Manager / PMO Manager / PM use them
+// daily, so they should be reachable in one click rather than scrolling past
+// the operational lists.
 const NAV_BY_ROLE: Record<RoleName, NavHref[]> = {
   SUPER_ADMIN: [],
 
   DIRECTOR: [
     "/dashboard",
+    "/sales-pipeline",
+    "/pmo",
     "/accounts",
     "/contacts",
     "/sites",
@@ -65,8 +72,6 @@ const NAV_BY_ROLE: Record<RoleName, NavHref[]> = {
     "/proposals",
     "/contracts",
     "/projects",
-    "/sales-pipeline",
-    "/pmo",
     "/procurement",
     "/documents",
     "/om",
@@ -75,9 +80,9 @@ const NAV_BY_ROLE: Record<RoleName, NavHref[]> = {
 
   PMO_MANAGER: [
     "/dashboard",
+    "/pmo",
     "/contracts",
     "/projects",
-    "/pmo",
     "/documents",
     "/reports",
   ],
@@ -108,9 +113,9 @@ const NAV_BY_ROLE: Record<RoleName, NavHref[]> = {
 
   PROJECT_MANAGER: [
     "/dashboard",
+    "/pmo",
     "/contracts",
     "/projects",
-    "/pmo",
     "/documents",
     "/reports",
   ],
@@ -123,11 +128,11 @@ const NAV_BY_ROLE: Record<RoleName, NavHref[]> = {
 
   DESIGN_LEAD: [
     "/dashboard",
+    "/pmo",
     "/opportunities",
     "/proposals",
     "/projects",
     "/documents",
-    "/pmo",
     "/reports",
   ],
 
