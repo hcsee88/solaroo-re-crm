@@ -680,18 +680,23 @@ export class OpportunitiesService {
       select: {
         id: true,
         opportunityCode: true,
-        _count: { select: { proposals: true } },
+        // Pull the proposal codes (not just count) so the error message can
+        // tell the user exactly which proposals to delete first.
+        proposals: { select: { proposalCode: true } },
         project: { select: { id: true, projectCode: true } },
       },
     });
     if (!existing) throw new NotFoundException(`Opportunity ${id} not found`);
 
     const blockers: string[] = [];
-    if (existing._count.proposals > 0) blockers.push(`${existing._count.proposals} proposal${existing._count.proposals === 1 ? '' : 's'}`);
+    if (existing.proposals.length > 0) {
+      const codes = existing.proposals.map((p) => p.proposalCode).join(', ');
+      blockers.push(`proposal${existing.proposals.length === 1 ? '' : 's'} ${codes}`);
+    }
     if (existing.project) blockers.push(`project ${existing.project.projectCode}`);
     if (blockers.length > 0) {
       throw new BadRequestException(
-        `Cannot delete opportunity ${existing.opportunityCode} — still referenced by ${blockers.join(', ')}. Mark the opportunity as LOST instead, or delete the dependents first.`,
+        `Cannot delete opportunity ${existing.opportunityCode} because ${blockers.join(' and ')} still exist. Open ${blockers.join(' / ')}, delete ${existing.proposals.length + (existing.project ? 1 : 0) === 1 ? 'it' : 'them'} first, then return to delete this opportunity.`,
       );
     }
 
