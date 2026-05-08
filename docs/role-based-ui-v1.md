@@ -1,8 +1,11 @@
 # Role-Based UI — V1 Direction
 
 **Date:** 2026-04-13  
+**Last reviewed:** 2026-05-08  
 **Status:** Implemented  
 **Source of truth:** `apps/web/src/lib/role-ui.ts`
+
+> **2026-05-08 — current direction:** the next module is **Sales Pipeline Monitoring V1**. The role-based UI surface for the new sprint is small: a `/sales-pipeline` dashboard page (visible to DIRECTOR, SALES_MANAGER, SALES_ENGINEER) plus the Activity-Timeline and Health-Badge components rendered on opportunity / account / contact / site detail pages. Sensitive-field visibility (margin, CAPEX, pipeline value) is unchanged. Sales activity logging is **manual only** — there are no email / WhatsApp / call / calendar / AI integration UI surfaces in V1.
 
 ---
 

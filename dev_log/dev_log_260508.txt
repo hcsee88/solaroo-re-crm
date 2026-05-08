@@ -1,0 +1,237 @@
+Solaroo RE CRM — Dev Log — 2026-05-08
+======================================
+
+Documentation-only update. No application code, schema, permissions, or UI
+changes. Captures the conclusion of the latest CRM review and the recommended
+next product direction.
+
+──────────────────────────────────────────────────────────────────────────────
+## 2026-05-08 — CRM Sales Pipeline Review
+
+### Review summary
+
+- Reviewed current CRM progress and lifecycle coverage end-to-end.
+- Confirmed the system is already strong on:
+  - Auth / roles / permissions
+  - Accounts / contacts / sites
+  - Opportunities (incl. stage history, design-engineer assignment)
+  - Proposals (versions, frozen assumptions, approval chain)
+  - Contracts (incl. handover workflow + milestones + invoices)
+  - Projects + PMO gates (G1–G6)
+  - Documents (paginated list, upload, revision history, approve/reject)
+  - Notifications (in-app bell, daily digest worker)
+  - Audit log (global AuditService + auto-capture interceptor + EditMetaPill)
+  - PMO dashboard (cash position, recent audit feed, RAG distribution)
+  - Reports (/reports landing page; sales pipeline reporting endpoint)
+- Identified the CRM **sales monitoring layer** as the next-best improvement
+  area. Management lacks daily visibility into:
+    - overdue follow-ups
+    - stale opportunities
+    - opportunities without a next action
+    - proposal follow-up status
+    - salesperson activity volume
+    - expected-close discipline
+    - pipeline forecast & overall sales pipeline health
+- Decided to prioritise sales pipeline discipline before O&M.
+
+### Product decision
+
+- Sales activity tracking will be **manual only** in V1.
+- No email, WhatsApp, call, Outlook, Gmail, calendar, telephony, or AI
+  integration in this phase. Salespeople perform actions outside the CRM and
+  manually log them.
+- The CRM tracks activity notes and next-action due dates for visibility.
+- The discipline tool is the **next-action due date** — every open
+  opportunity should have one and only one open next action.
+
+### Recommended next module
+
+**Sales Pipeline Monitoring V1**, build sequence:
+
+1. Manual activity logging (call / email / WhatsApp / meeting / site visit /
+   proposal follow-up / general note) — single Activity table, no integrations.
+2. Next-action tracking — type, owner, due date, status; one open action
+   per live opportunity.
+3. Opportunity health indicators — Healthy / At Risk / Stale / Overdue;
+   computed at read time, never stored.
+4. Opportunity list filters + saved views — My Open, Closing this month,
+   Closing this quarter, No next action, Overdue, No activity 14d / 30d,
+   Proposal submitted, High value, Won this month, Lost this month.
+5. Sales pipeline dashboard at `/sales-pipeline` — pipeline summary, by-stage
+   breakdown, sales activity volume, follow-up monitoring, proposal monitoring,
+   closing forecast, top 10, won this month.
+6. Internal notification hook points (in-app only) — overdue next action
+   (daily), proposal awaiting follow-up (3d silence), stale opportunity
+   (14d silence). Routed via existing Notification table + worker.
+
+### Rationale
+
+- Management needs better visibility into sales follow-up discipline.
+- Opportunities should not sit idle without a next action.
+- Proposal follow-up needs to be visible.
+- Lightweight manual logging gives immediate value without integration
+  complexity. We can layer email/WhatsApp/calendar later if the manual
+  rhythm proves the workflow has product-market fit.
+
+### Deferred
+
+- O&M module (item 10 of original MVP build order).
+- Email notification delivery (BullMQ worker still uses setInterval for
+  daily digest only).
+- WhatsApp / call / calendar / telephony integration.
+- AI automation (auto-summary, auto-next-action suggestions).
+- Advanced comments / threading on activities.
+- Attachments on activities (use Documents module).
+
+### Documentation updates made today
+
+- `CLAUDE.md` — appended a "Current recommendation (2026-05-08)" block
+  under MVP build order; references this dev log + v1-product-direction.md.
+- `docs/v1-product-direction.md` — added Current-recommendation section at
+  the top with the full Sales Pipeline V1 build sequence + out-of-scope list;
+  added a 2026-05-08 update note to the Post-V1 Priorities section.
+- `docs/architecture/overview.md` — annotated the lifecycle with the manual
+  Activity / Next Action layer and added a current-direction callout.
+- `docs/architecture/system-architecture.md` — added a Current-direction
+  section noting the sprint is additive to existing crm + proposals + audit
+  modules; no new schema / no new permissions / no integrations.
+- `docs/crm-workflow-and-role-matrix.md` — added the explicit
+  "Account → Contact → Site → Opportunity → Activity / Next Action →
+  Proposal → Contract → Project" workflow diagram with manual-only
+  clarifications.
+- `docs/crm-role-matrix-one-page.md` — added a 2026-05-08 callout noting
+  who logs activity, who consumes the resulting visibility.
+- `docs/pmo-v1-direction.md` — added a 2026-05-08 update note clarifying
+  that PMO V1 is stable and the upstream sales-discipline layer is next.
+- `docs/role-based-ui-v1.md` — added a 2026-05-08 callout noting the small
+  new UI surface (sales-pipeline page, activity timeline, health badge)
+  and reaffirming manual-only.
+
+### Next recommended implementation prompt
+
+Reference for the upcoming Claude Code task:
+
+> "Improve Sales Pipeline Flow V1 — manual activity logging, next actions,
+>  health indicators, opportunity filters, sales dashboard, in-app
+>  notification hook points. Manual only — no email / WhatsApp / call /
+>  calendar / AI integration."
+
+Suggested location for the prompt file (not created yet, owner's choice):
+`docs/prompts/sales-pipeline-v1-prompt.md`.
+
+──────────────────────────────────────────────────────────────────────────────
+## 2026-05-08 (later same day) — Sales Pipeline Lite
+
+### Why the dial-back
+
+After shipping commit 33ea21e (Sales Pipeline V1 alignment with 7d AT_RISK /
+14d STALE thresholds + 3 spec docs) the team reviewed the result and
+concluded the dashboard was too dense and the thresholds too pressuring for
+a 15-person engineering business. The CRM should feel like a helpful
+operating system, not a stressful reporting tool.
+
+### Decisions made (12 questions, all answered)
+
+  Q1  — A2: Layer Lite on top; rewrite V1 docs in place
+  Q2  — B2: Worker tickProposalNoFollowup 3 → 7 days
+  Q3  — C2: Keep BOTH "Won this month"/"Lost this month" AND add all-time
+              "Won"/"Lost" chips
+  Q4  — D1: Keep "High value (≥1M)" filter
+  Q5  — E1: Remove closingForecast + activitySummary from API payload
+  Q6  — F1: Silent drop unknown filter keys from saved views
+  Q7  — G1: Tight UI scope (3 specific changes)
+  Q8  — H2: Stage-aware via worker only; health pill uniform 30d
+  Q9  — I1: Defer server-side sensitive-value enforcement to V2
+  Q10 — J2: Keep *-v1.md filenames; rewrite content; add sales-pipeline-lite.md
+  Q11 — K1: No migration needed (health computed, never stored)
+  Q12 — L1: Keep enum name STALE; UI label "Needs follow-up"
+
+### Code changes (commit pending)
+
+Backend
+  - apps/api/src/modules/opportunities/opportunity-health.ts
+      • Removed AT_RISK from union; STALE threshold 14 → 30 days
+      • Treats CANCELLED next-action status as not-open (won't trigger OVERDUE)
+  - apps/api/src/modules/opportunities/opportunities.dto.ts
+      • Added `won` and `lost` (all-time) to OpportunityQuerySchema
+  - apps/api/src/modules/opportunities/opportunities.service.ts
+      • Wired `won` / `lost` filters into where clause
+  - apps/api/src/modules/reporting/reporting.service.ts
+      • Removed `closingForecast` (this-month + this-quarter)
+      • Removed `activitySummary` (per-owner ranking)
+      • Added `needsAttention` table (overdue + no-next-action, 20 max)
+      • Promoted `proposalMonitoring` from count to count + items list
+  - services/worker/src/index.ts
+      • NO_ACTIVITY_DAYS 14 → 30
+      • PROPOSAL_NO_FOLLOWUP_DAYS 3 → 7
+  - packages/types/src/index.ts
+      • OpportunityHealth narrowed to 'HEALTHY' | 'STALE' | 'OVERDUE'
+      • EffectiveNextActionStatus widened with 'CANCELLED'
+
+Frontend
+  - apps/web/src/components/opportunities/health-badge.tsx
+      • 3-state pill, "Needs follow-up" label for STALE
+      • Legacy AT_RISK → STALE shim (remove next sprint)
+  - apps/web/src/app/(app)/opportunities/page.tsx
+      • Chips: removed closingThisMonth / closingThisQuarter / noActivity14d
+      • Chips: added all-time `won` / `lost`
+      • Chip rename: "Overdue next action" → "Overdue follow-up"
+                     "No activity 30d" → "Stale 30 days"
+      • Row padding tightened py-3 → py-2 (~40px row)
+      • Title cell collapsed to single line (site name moved to title attr)
+      • Saved-view restore array updated; pre-Lite views still load (unknown
+        keys silently dropped)
+  - apps/web/src/app/(app)/sales-pipeline/page.tsx
+      • Rewritten: 5 cards + Pipeline-by-Stage + Needs-Attention table
+      • Optional Proposals-Awaiting-Follow-up table (hidden when count=0)
+      • Removed: closingForecast, activitySummary, top10 sections
+      • Card click-throughs to filtered opportunity list
+      • Pipeline-value column on by-stage table hidden for SALES_ENGINEER
+
+Docs
+  - docs/sales-pipeline-lite.md  — NEW umbrella scope decision (Q&A log included)
+  - docs/opportunity-health-rules.md  — REWRITTEN for 3-state 30d
+  - docs/sales-dashboard-v1.md  — REWRITTEN for Lite scope
+  - docs/sales-activity-v1.md  — minor banner; module unchanged
+  - CLAUDE.md  — appended Lite-scope callout under the lifecycle line
+  - dev_log/dev_log_260508.txt  — this entry
+
+### What was removed (intentional)
+
+  - AT_RISK health state
+  - 7-day pressure threshold
+  - "Closing this month" / "Closing this quarter" filter chips
+  - Closing forecast section on dashboard
+  - Weighted forecast section on dashboard
+  - Activity volume by salesperson section (felt like ranking)
+  - Top 10 by value section
+  - "No activity 14d" filter chip
+
+### Notification carry-over
+
+The `notifications` table still contains rows fired with the old wording
+("14 days+", "3 days") from prior worker ticks. These will scroll off
+naturally as the bell list ages. The next worker tick uses the new wording
+(30 days / 7 days). No migration done — Q11 / K1.
+
+### Schema
+
+No schema changes in this revision.
+
+### Verification
+
+  - apps/api    typecheck clean
+  - apps/web    typecheck clean
+  - dev API + Web running locally; manual smoke test pending user verification
+    (test plan: open /sales-pipeline as Director, see 5 cards + by-stage +
+    needs-attention; open /opportunities, verify chip set + tightened rows)
+
+### Next sprint candidates
+
+See docs/sales-pipeline-lite.md § 7. Top three:
+  1. Pipeline-by-Owner chart (one groupBy query)
+  2. Server-side sensitive-value enforcement on /sales-pipeline
+  3. Unit tests for opportunity-health.ts
+
+──────────────────────────────────────────────────────────────────────────────
+End of 2026-05-08 entry.

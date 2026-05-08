@@ -100,8 +100,11 @@ async function runDigestTick(): Promise<void> {
 
 const SALES_TICK_MS         = 60 * 60 * 1000;   // hourly
 const RECENT_DEDUPE_HOURS   = 22;               // re-fire roughly once per day
-const NO_ACTIVITY_DAYS      = 14;
-const PROPOSAL_NO_FOLLOWUP_DAYS = 3;
+// Sales Pipeline Lite (2026-05-08): calmer nudges.
+//   Stale opps: 14 → 30 days (matches the health pill's STALE definition)
+//   Proposal-stage chase: 3 → 7 days (still stage-aware, less anxious)
+const NO_ACTIVITY_DAYS      = 30;
+const PROPOSAL_NO_FOLLOWUP_DAYS = 7;
 
 async function alreadyNotifiedRecently(opts: {
   userId: string;

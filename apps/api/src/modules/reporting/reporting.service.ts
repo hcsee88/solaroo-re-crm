@@ -561,21 +561,27 @@ export class ReportingService {
     const TERMINAL = ['WON', 'LOST'] as OpportunityStage[];
     const PROPOSAL_STAGES = ['BUDGETARY_PROPOSAL', 'FIRM_PROPOSAL'] as OpportunityStage[];
 
+    // Sales Pipeline Lite (2026-05-08): payload trimmed to operational signals.
+    // Removed: closingForecast (this-month / this-quarter), activitySummary
+    // (per-owner ranking) — both deferred to V2 to keep the dashboard calm.
+    void startMonth; void endMonth; void startQ; void endQ; void sevenDaysAgo;
+    void fourteenDays; void threeDaysAgo;
+
+    const PROPOSAL_NO_FOLLOWUP_DAYS = 7;
+    const proposalThreshold = new Date(now.getTime() - PROPOSAL_NO_FOLLOWUP_DAYS * 86_400_000);
+
     const [
       activeOpps,
       pipelineValueAgg,
       stageBreakdown,
-      activitiesThisWeek,
-      activityByOwner,
       overdueNextActions,
       noNextAction,
       stale30,
-      stale14,
       proposalsAwaitingFollowup,
-      closingThisMonthList,
-      closingThisQuarterList,
+      proposalsAwaitingFollowupList,
       topOpportunities,
       wonThisMonth,
+      needsAttentionList,
     ] = await Promise.all([
       // Pipeline Summary base
       this.prisma.opportunity.findMany({
@@ -594,14 +600,7 @@ export class ReportingService {
         _count: { id: true },
         _sum: { estimatedValue: true },
       }),
-      // Sales activity summary
-      this.prisma.activity.count({ where: { occurredAt: { gte: sevenDaysAgo } } }),
-      this.prisma.activity.groupBy({
-        by: ['ownerUserId'],
-        where: { occurredAt: { gte: sevenDaysAgo } },
-        _count: { id: true },
-      }),
-      // Follow-up monitoring
+      // Follow-up monitoring (counts, surface as 5 quick cards)
       this.prisma.opportunity.count({
         where: {
           stage: { notIn: TERMINAL },
@@ -618,20 +617,20 @@ export class ReportingService {
       this.prisma.opportunity.count({
         where: {
           stage: { notIn: TERMINAL },
-          activities: { none: { occurredAt: { gte: thirtyDays } } },
+          activities: { none: { occurredAt: { gte: new Date(now.getTime() - 30 * 86_400_000) } } },
         },
       }),
+      // Proposal monitoring — opps in proposal stage with no follow-up activity in last 7 days (Lite threshold)
       this.prisma.opportunity.count({
         where: {
-          stage: { notIn: TERMINAL },
-          activities: { none: { occurredAt: { gte: fourteenDays } } },
+          stage: { in: PROPOSAL_STAGES },
+          activities: { none: { occurredAt: { gte: proposalThreshold } } },
         },
       }),
-      // Proposal monitoring — opps in proposal stage with no follow-up activity in last 3 days
       this.prisma.opportunity.findMany({
         where: {
           stage: { in: PROPOSAL_STAGES },
-          activities: { none: { occurredAt: { gte: threeDaysAgo } } },
+          activities: { none: { occurredAt: { gte: proposalThreshold } } },
         },
         select: {
           id: true,
@@ -639,32 +638,11 @@ export class ReportingService {
           title: true,
           stage: true,
           updatedAt: true,
-          owner: { select: { id: true, name: true } },
+          owner:   { select: { id: true, name: true } },
           account: { select: { id: true, name: true } },
         },
         orderBy: { updatedAt: 'asc' },
         take: 20,
-      }),
-      // Closing forecast — this month
-      this.prisma.opportunity.findMany({
-        where: {
-          stage: { notIn: TERMINAL },
-          expectedAwardDate: { gte: startMonth, lte: endMonth },
-        },
-        select: {
-          id: true, opportunityCode: true, title: true, stage: true,
-          estimatedValue: true, probabilityPercent: true, expectedAwardDate: true,
-          owner: { select: { id: true, name: true } },
-          account: { select: { id: true, name: true } },
-        },
-        orderBy: { expectedAwardDate: 'asc' },
-      }),
-      // Closing forecast — this quarter
-      this.prisma.opportunity.count({
-        where: {
-          stage: { notIn: TERMINAL },
-          expectedAwardDate: { gte: startQ, lte: endQ },
-        },
       }),
       // Top 10 open opportunities by value
       this.prisma.opportunity.findMany({
@@ -674,7 +652,7 @@ export class ReportingService {
         select: {
           id: true, opportunityCode: true, title: true, stage: true,
           estimatedValue: true, probabilityPercent: true, expectedAwardDate: true,
-          owner: { select: { id: true, name: true } },
+          owner:   { select: { id: true, name: true } },
           account: { select: { id: true, name: true } },
         },
       }),
@@ -683,14 +661,29 @@ export class ReportingService {
         _count: { id: true },
         _sum: { estimatedValue: true },
       }),
+      // Needs attention table — overdue + no-next-action, sorted by oldest neglect
+      this.prisma.opportunity.findMany({
+        where: {
+          stage: { notIn: TERMINAL },
+          OR: [
+            {
+              nextActionStatus: 'PENDING',
+              nextActionDueDate: { lt: now },
+            },
+            { nextAction: null },
+            { nextAction: '' },
+          ],
+        },
+        select: {
+          id: true, opportunityCode: true, title: true, stage: true,
+          nextAction: true, nextActionDueDate: true, updatedAt: true,
+          owner:   { select: { id: true, name: true } },
+          account: { select: { id: true, name: true } },
+        },
+        orderBy: [{ nextActionDueDate: 'asc' }, { updatedAt: 'asc' }],
+        take: 20,
+      }),
     ]);
-
-    // Resolve user IDs → names for the activityByOwner table
-    const ownerIds = activityByOwner.map((a) => a.ownerUserId);
-    const owners = ownerIds.length
-      ? await this.prisma.user.findMany({ where: { id: { in: ownerIds } }, select: { id: true, name: true } })
-      : [];
-    const ownerMap = new Map(owners.map((u) => [u.id, u.name]));
 
     // Weighted pipeline value: estimatedValue * probabilityPercent / 100
     let weightedTotal = 0;
@@ -716,27 +709,16 @@ export class ReportingService {
         count: r._count.id,
         value: Number(r._sum.estimatedValue ?? 0),
       })),
-      activitySummary: {
-        totalActivitiesThisWeek: activitiesThisWeek,
-        byOwner: activityByOwner
-          .map((a) => ({ userId: a.ownerUserId, name: ownerMap.get(a.ownerUserId) ?? '(unknown)', count: a._count.id }))
-          .sort((a, b) => b.count - a.count),
-      },
       followUpMonitoring: {
         overdueNextActions,
         noNextAction,
         staleOpportunities30d: stale30,
-        staleOpportunities14d: stale14,
       },
       proposalMonitoring: {
         proposalsAwaitingFollowup,
+        items: proposalsAwaitingFollowupList,
       },
-      closingForecast: {
-        thisMonthCount:   closingThisMonthList.length,
-        thisMonthValue:   closingThisMonthList.reduce((s, o) => s + Number(o.estimatedValue ?? 0), 0),
-        thisQuarterCount: closingThisQuarterList,
-        thisMonthList:    closingThisMonthList,
-      },
+      needsAttention: needsAttentionList,
       topOpportunities,
       wonThisMonth: {
         count: wonThisMonth._count?.id ?? 0,

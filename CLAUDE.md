@@ -16,6 +16,8 @@ The company delivers off-grid solar and BESS projects. Typical customers include
 Account → Contact → Site → Opportunity → Activity / Next Action → Proposal → Contract → Project → Commissioning → Asset Register → O&M
 
 > **2026-05-08 — sales discipline layer:** the `Activity / Next Action` stop is part of Sales Pipeline Monitoring V1. Activities are manual CRM records (call / email / WhatsApp / meeting / site visit / proposal follow-up / general note). They are not integrated with email / WhatsApp / telephony / calendar / AI in V1. See `docs/sales-activity-v1.md`, `docs/opportunity-health-rules.md`, and `docs/sales-dashboard-v1.md`.
+>
+> **2026-05-08 (later same day) — Sales Pipeline Lite:** the V1 sales scope was dialled back into a lighter, calmer version. **Health is now 3 states** (HEALTHY / OVERDUE / STALE — `AT_RISK` removed). **Stale threshold is 30 days** (was 14). **Closing-this-month / quarter / weighted-forecast / activity-leaderboard / top-10 sections were removed from the dashboard.** Manual-only activity logging unchanged. See `docs/sales-pipeline-lite.md` for the full scope decision and Q&A trail.
 
 ## Team size
 15 users now. Expected to double in ~2 years. Design for ~30 concurrent users.

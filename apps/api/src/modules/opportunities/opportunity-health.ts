@@ -1,19 +1,25 @@
 // Pure helpers — no DB, no IO. Used by OpportunitiesService and ReportingService.
 
-export type OpportunityHealth = 'HEALTHY' | 'AT_RISK' | 'STALE' | 'OVERDUE';
+// Sales Pipeline Lite (2026-05-08): 3-state health.
+// AT_RISK was removed — it created noise without adding actionable signal.
+// See docs/opportunity-health-rules.md and docs/sales-pipeline-lite.md.
+export type OpportunityHealth = 'HEALTHY' | 'STALE' | 'OVERDUE';
 
-export type EffectiveNextActionStatus = 'PENDING' | 'COMPLETED' | 'OVERDUE' | 'NONE';
+export type EffectiveNextActionStatus =
+  | 'PENDING'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'OVERDUE'
+  | 'NONE';
 
-// V1 health thresholds — see docs/opportunity-health-rules.md
-//   AT_RISK if no activity in > 7 days
-//   STALE   if no activity in > 14 days
-//   OVERDUE if next-action due date has passed (highest priority)
-const AT_RISK_DAYS = 7;
-const STALE_DAYS   = 14;
+// Lite threshold: no activity for > 30 days = STALE.
+// Worker may apply a stage-specific shorter nudge (proposal stages → 7 days)
+// for proactive notifications, but the health pill itself uses a uniform 30d.
+const STALE_DAYS = 30;
 
 /**
- * Compute the four-state health of an opportunity from its activity recency
- * and next-action state. Order matters: OVERDUE > STALE > AT_RISK > HEALTHY.
+ * Compute the three-state health of an opportunity from its activity recency
+ * and next-action state. Order matters: OVERDUE > STALE > HEALTHY.
  */
 export function computeOpportunityHealth(input: {
   stage: string;                         // current stage
@@ -30,7 +36,7 @@ export function computeOpportunityHealth(input: {
   }
 
   // OVERDUE — open action (not COMPLETED, not CANCELLED) whose due date has passed.
-  // Highest priority — wins over STALE / AT_RISK.
+  // Highest priority.
   const isOpenAction =
     input.nextActionStatus !== 'COMPLETED' && input.nextActionStatus !== 'CANCELLED';
   if (
@@ -41,14 +47,11 @@ export function computeOpportunityHealth(input: {
     return 'OVERDUE';
   }
 
+  // STALE — no activity in > 30 days
   const ageDays = input.lastActivityAt
     ? (now.getTime() - input.lastActivityAt.getTime()) / 86_400_000
     : Infinity;
-  if (ageDays > STALE_DAYS)   return 'STALE';
-  if (ageDays > AT_RISK_DAYS) return 'AT_RISK';
-
-  // No next action recorded at all (and recent activity) → still AT_RISK
-  if (!input.nextAction || input.nextAction.trim() === '') return 'AT_RISK';
+  if (ageDays > STALE_DAYS) return 'STALE';
 
   return 'HEALTHY';
 }

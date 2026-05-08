@@ -1,5 +1,7 @@
 # Solaroo RE CRM — Architecture Overview
 
+**Last reviewed:** 2026-05-08
+
 ## System type
 Modular monolith. Single deployable application with clearly bounded domain modules. Future split to microservices is possible but not planned until the system matures and team scales significantly.
 
@@ -7,6 +9,16 @@ Modular monolith. Single deployable application with clearly bounded domain modu
 ```
 Account → Site → Opportunity → Proposal → Contract → Project → Commissioning → Asset Register → O&M
 ```
+
+The sales segment of the lifecycle is now annotated with manual activity-logging discipline:
+
+```
+Account → Contact → Site → Opportunity → Activity / Next Action → Proposal → Contract → Project
+```
+
+Activities are CRM records (call / email / WhatsApp / meeting / site visit / proposal follow-up / general note). They are **not** integrated with email/WhatsApp/calendar/telephony in V1 — salespeople log them manually after the fact. Next-action due dates drive overdue + stale flags surfaced in dashboards and list filters.
+
+> **Current direction (2026-05-08):** the next module is **Sales Pipeline Monitoring V1** — manual activity logging, next-action tracking, opportunity health indicators, list filters + saved views, sales pipeline dashboard, in-app notification hook points. O&M is deferred. See `docs/v1-product-direction.md` for full rationale.
 
 ## Layers
 

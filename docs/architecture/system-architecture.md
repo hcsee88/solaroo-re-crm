@@ -1,8 +1,24 @@
 # Solaroo RE CRM — System Architecture
 
-**Date:** 2026-04-13  
+**Date:** 2026-04-13 (last reviewed: 2026-05-08)  
 **Status:** Living document — updated as build progresses  
 **Company:** Pekat Teknologi Sdn Bhd (internal platform, not SaaS)
+
+---
+
+## Current direction (2026-05-08)
+
+**Next module: Sales Pipeline Monitoring V1.** O&M deferred. The architectural surface needed for the next sprint is small and additive:
+
+- Existing `Activity` table extended (`activityType`, `nextActionType`, `nextActionStatus`, `nextActionOwnerId`, `nextActionCompletedAt`, `lastStatusNote`) — already in `crm.prisma`.
+- Existing `Opportunity` model gains computed-at-read health indicator (`Healthy / At Risk / Stale / Overdue`) — no new column.
+- Existing `SavedView` table reused for opportunity-list saved filters.
+- Existing `Notification` table reused for hook-point alerts (`overdue_next_action`, `proposal_no_followup`, `opportunity_stale`) fired by the worker.
+- New page: `/sales-pipeline` (read-only dashboard reusing reporting endpoints).
+
+**No new major module** is introduced for this sprint — it's an enhancement layer over `crm`, `proposals`, and `audit/notifications`. Sales activity logging is **manual only**: no email / WhatsApp / call / Outlook / Gmail / calendar / telephony / AI integration in V1.
+
+See `docs/v1-product-direction.md` for the full Sales Pipeline V1 scope and rationale.
 
 ---
 

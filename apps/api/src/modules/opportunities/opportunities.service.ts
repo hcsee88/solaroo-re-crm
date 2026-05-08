@@ -191,6 +191,8 @@ export class OpportunitiesService {
     if (query.highValue)            andFilters.push({ estimatedValue: { gte: 1_000_000 } });
     if (query.wonThisMonth)         andFilters.push({ AND: [{ stage: 'WON' }, { updatedAt: { gte: startOfMonth(now), lte: endOfMonth(now) } }] });
     if (query.lostThisMonth)        andFilters.push({ AND: [{ stage: 'LOST' }, { updatedAt: { gte: startOfMonth(now), lte: endOfMonth(now) } }] });
+    if (query.won)                  andFilters.push({ stage: 'WON' });
+    if (query.lost)                 andFilters.push({ stage: 'LOST' });
     // No-activity filters use Prisma's `none` quantifier on the activities relation
     if (query.noActivity14d) {
       const cutoff = new Date(now.getTime() - 14 * 86_400_000);

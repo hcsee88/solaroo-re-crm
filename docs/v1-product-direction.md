@@ -2,7 +2,47 @@
 
 **Status:** Active  
 **Owner:** Pekat Teknologi Sdn Bhd  
-**Last updated:** 2026-04-15
+**Last updated:** 2026-05-08
+
+---
+
+## Current recommendation (2026-05-08)
+
+**Next priority: Sales Pipeline Monitoring V1 — not O&M yet.**
+
+A review of CRM progress confirmed the lifecycle backbone is strong (auth, accounts, contacts, sites, opportunities, proposals, contracts + handover, project gates, documents, notifications, audit log, PMO dashboard, reports). The weak spot is the **sales operating rhythm**: management cannot reliably see overdue follow-ups, stale opportunities, opportunities without a next action, proposal follow-up status, salesperson activity, expected-close discipline, or pipeline forecast at a glance.
+
+The recommended next module is **Sales Pipeline Monitoring V1**. O&M remains important but is deferred until sales discipline is tight, because:
+
+- Without follow-up visibility, deals go silent and revenue is lost.
+- O&M tickets without strong upstream handover/QA have low signal.
+- Sales discipline is a near-term lift; O&M is a multi-month effort.
+
+**Manual-only product decision.** Sales activity tracking remains **manual logging only** in V1. No email, WhatsApp, call, Outlook, Gmail, calendar, telephony, or AI integrations. Salespeople perform actions outside the CRM and log them as activity records. The CRM tracks what happened, when, and what's next — not the channels themselves.
+
+**Sales Pipeline V1 — recommended build sequence:**
+
+1. **Sales Activity Logging** — manual only (call / email / WhatsApp / meeting / site visit / proposal follow-up / general note)
+2. **Opportunity Next Action Tracking** — type, owner, due date, status; one open action per live opportunity
+3. **Opportunity Health Indicators** — Healthy / At Risk / Stale / Overdue; computed at read time
+4. **Opportunity List Filters + Saved Views** — My Open, Closing this month, Closing this quarter, No next action, Overdue, No activity 14d / 30d, Proposal submitted, High value, Won this month, Lost this month
+5. **Sales Pipeline Dashboard** — pipeline summary, by-stage breakdown, sales activity volume, follow-up monitoring, proposal monitoring, closing forecast, top 10, won this month
+6. **Sales Notification Hook Points** — in-app only; overdue next action (daily), proposal awaiting follow-up (3d), stale opportunity (14d)
+7. **Demo Fixture Data** — realistic accounts/sites/opps/activities so first-time users see a populated pipeline
+8. **Mobile Site Supervisor UX** — site team must log activity / progress on phone
+9. **O&M Module** — proper post-handover workflow (after the above)
+
+**Out of scope for Sales Pipeline V1:**
+
+- Email integration (no Gmail/Outlook hookup)
+- WhatsApp integration (no Meta Business API, no link-in)
+- Call integration (no telephony, no Twilio)
+- Calendar integration (no Google/Outlook calendar sync)
+- AI automation (no auto-summary, no auto-next-action suggestions)
+- Threaded comments on activities
+- Attachments on activities (use the Documents module instead)
+
+The original 10-step MVP build order below remains the long-term plan; the current recommendation slots Sales Pipeline V1 ahead of "10. O&M module".
 
 ---
 
@@ -220,3 +260,5 @@ Email delivery is deferred until BullMQ worker is implemented.
 7. Mobile-optimised site diary for field teams
 8. Advanced analytics and reporting
 9. O&M predictive maintenance scheduling
+
+> **2026-05-08 update:** the recommended near-term direction is Sales Pipeline Monitoring V1 (manual activity logging, next-action tracking, opportunity health, list filters + saved views, sales pipeline dashboard, in-app notification hook points). See the **Current recommendation** section at the top of this file for details. O&M (item 10 of the original MVP build order) and the post-V1 list above remain on the long-term plan but are deferred until sales discipline is in place.

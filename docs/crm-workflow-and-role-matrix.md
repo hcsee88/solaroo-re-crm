@@ -1,5 +1,7 @@
 # CRM Workflow And Role Matrix
 
+**Last reviewed:** 2026-05-08
+
 This document reflects the current CRM design and RBAC as implemented in code, based on:
 
 - `packages/db/src/seeds/permissions.seed.ts`
@@ -10,6 +12,23 @@ This document reflects the current CRM design and RBAC as implemented in code, b
 - `docs/pmo-v1-direction.md`
 
 It is intentionally practical rather than exhaustive. The role notes below summarize what each role can and cannot do in day-to-day operation.
+
+## Sales workflow with manual activity logging (2026-05-08)
+
+The full sales workflow now reads:
+
+```
+Account → Contact → Site → Opportunity → Activity / Next Action → Proposal → Contract → Project
+```
+
+Notes on the **Activity / Next Action** stop:
+
+- Activities are **manual CRM records**: call, email, WhatsApp, meeting, site visit, proposal follow-up, general note.
+- Activities **do not connect** to any external channel in V1 — no email, WhatsApp, telephony, calendar, or AI integration. Salespeople perform the action outside the CRM and then log it.
+- **Next Action** (type, owner, due date) is the primary sales discipline tool. Every open opportunity should have one and only one open next action.
+- **Overdue** (next-action due-date in the past) and **Stale** (no activity in 14/30 days) opportunities are surfaced through opportunity-list filters, the sales pipeline dashboard, and in-app notifications. They are the main signal for management chase.
+
+The original lifecycle diagram below covers the full project lifecycle from win through O&M; this Activity / Next Action layer sits inside the "Opportunity → Proposal" segment.
 
 ## Scope Legend
 

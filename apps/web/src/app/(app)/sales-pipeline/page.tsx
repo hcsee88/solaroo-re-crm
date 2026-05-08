@@ -1,11 +1,23 @@
 "use client";
 
+// Sales Pipeline Lite (2026-05-08).
+//   - 5 quick cards (operational signals only — no forecast pressure)
+//   - 1 simple Pipeline-by-Stage breakdown
+//   - 1 "Needs attention" table (overdue + no-next-action)
+//
+// Removed vs the original V1 dashboard (intentionally — see
+// docs/sales-pipeline-lite.md and docs/sales-dashboard-v1.md):
+//   - Closing this month / quarter forecast
+//   - Activity volume per salesperson (ranking-like)
+//   - Top 10 by value
+// The "By stage" breakdown shows COUNT (and value where the role can see it).
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import {
-  TrendingUp, AlertCircle, Clock, FileText, Target, Trophy, Users, ExternalLink,
-} from "lucide-react";
+import { TrendingUp, AlertCircle, FileText, ExternalLink } from "lucide-react";
 import { get } from "@/lib/api-client";
+import { useRoleName } from "@/hooks/use-current-user";
+import { canSeePipelineValue } from "@/lib/role-ui";
 
 type SalesPipelineMetrics = {
   pipelineSummary: {
@@ -15,36 +27,28 @@ type SalesPipelineMetrics = {
     averageDealSize: number;
   };
   stageBreakdown: { stage: string; count: number; value: number }[];
-  activitySummary: {
-    totalActivitiesThisWeek: number;
-    byOwner: { userId: string; name: string; count: number }[];
-  };
   followUpMonitoring: {
     overdueNextActions: number;
     noNextAction: number;
     staleOpportunities30d: number;
-    staleOpportunities14d: number;
   };
-  proposalMonitoring: { proposalsAwaitingFollowup: number };
-  closingForecast: {
-    thisMonthCount: number;
-    thisMonthValue: number;
-    thisQuarterCount: number;
-    thisMonthList: {
+  proposalMonitoring: {
+    proposalsAwaitingFollowup: number;
+    items: {
       id: string; opportunityCode: string; title: string; stage: string;
-      estimatedValue: string | null; probabilityPercent: number | null;
-      expectedAwardDate: string | null;
-      owner: { id: string; name: string };
+      owner:   { id: string; name: string };
       account: { id: string; name: string };
     }[];
   };
-  topOpportunities: {
+  needsAttention: {
     id: string; opportunityCode: string; title: string; stage: string;
-    estimatedValue: string | null; probabilityPercent: number | null;
-    expectedAwardDate: string | null;
-    owner: { id: string; name: string };
+    nextAction: string | null;
+    nextActionDueDate: string | null;
+    updatedAt: string;
+    owner:   { id: string; name: string };
     account: { id: string; name: string };
   }[];
+  topOpportunities: unknown;     // present in API, not rendered in Lite
   wonThisMonth: { count: number; value: number };
   generatedAt: string;
 };
@@ -65,16 +69,28 @@ function fmtDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString("en-MY", { day: "numeric", month: "short" });
 }
 
+function daysFromNow(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const diff = Math.floor((d.getTime() - Date.now()) / 86_400_000);
+  if (diff === 0)  return "today";
+  if (diff < 0)   return `${Math.abs(diff)}d overdue`;
+  return `in ${diff}d`;
+}
+
 export default function SalesPipelinePage() {
   const [data, setData] = useState<SalesPipelineMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const roleName = useRoleName();
+  const canSeeValues = canSeePipelineValue(roleName);
+
   useEffect(() => {
     get<SalesPipelineMetrics>("/reporting/sales-pipeline")
       .then(setData)
       .catch((err) => {
-        const status = (err as { response?: { status?: number } })?.response?.status;
+        const status = (err as { status?: number })?.status;
         setError(status === 403
           ? "You don't have permission to view sales pipeline reports."
           : ((err as Error).message ?? "Failed to load"));
@@ -98,14 +114,14 @@ export default function SalesPipelinePage() {
 
   return (
     <div className="space-y-6 p-6 max-w-6xl">
-      {/* Header */}
+      {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           <TrendingUp className="w-6 h-6" style={{ color: "#0073ea" }} />
           <div>
             <h1 className="text-2xl font-semibold" style={{ color: "#323338" }}>Sales Pipeline</h1>
             <p className="text-sm mt-1" style={{ color: "#676879" }}>
-              Sales execution discipline. Pipeline health, activity, follow-ups, and forecast.
+              Where the team is on follow-up discipline. No closing pressure — just signal.
             </p>
           </div>
         </div>
@@ -114,25 +130,49 @@ export default function SalesPipelinePage() {
         </div>
       </div>
 
-      {/* ── Pipeline Summary ───────────────────────────────────────────── */}
-      <Section title="Pipeline summary" icon={<TrendingUp className="w-4 h-4" />}>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Kpi label="Active opportunities" value={data.pipelineSummary.totalActiveOpportunities} />
-          <Kpi label="Total pipeline value" value={fmt(data.pipelineSummary.totalPipelineValue)} colour="#0073ea" />
-          <Kpi label="Weighted (× probability)" value={fmt(data.pipelineSummary.weightedPipelineValue)} colour="#a25ddc" />
-          <Kpi label="Average deal size" value={fmt(data.pipelineSummary.averageDealSize)} />
-        </div>
-      </Section>
+      {/* ── 5 Quick cards ──────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <Kpi
+          label="Active opportunities"
+          value={data.pipelineSummary.totalActiveOpportunities}
+          caption={canSeeValues ? fmt(data.pipelineSummary.totalPipelineValue) : undefined}
+          link="/opportunities?myOnly=false"
+        />
+        <Kpi
+          label="No next action"
+          value={data.followUpMonitoring.noNextAction}
+          tone={data.followUpMonitoring.noNextAction > 0 ? "warn" : "ok"}
+          link="/opportunities?noNextAction=true"
+        />
+        <Kpi
+          label="Overdue follow-ups"
+          value={data.followUpMonitoring.overdueNextActions}
+          tone={data.followUpMonitoring.overdueNextActions > 0 ? "alert" : "ok"}
+          link="/opportunities?overdueNextAction=true"
+        />
+        <Kpi
+          label="Stale (30+ days)"
+          value={data.followUpMonitoring.staleOpportunities30d}
+          tone={data.followUpMonitoring.staleOpportunities30d > 0 ? "warn" : "ok"}
+          link="/opportunities?noActivity30d=true"
+        />
+        <Kpi
+          label="Proposals awaiting follow-up"
+          value={data.proposalMonitoring.proposalsAwaitingFollowup}
+          tone={data.proposalMonitoring.proposalsAwaitingFollowup > 0 ? "warn" : "ok"}
+          link="/opportunities?proposalSubmitted=true"
+        />
+      </div>
 
-      {/* ── Stage Breakdown ────────────────────────────────────────────── */}
-      <Section title="By stage" icon={<TrendingUp className="w-4 h-4" />} link={{ href: "/opportunities", label: "Open opportunities →" }}>
+      {/* ── Pipeline by Stage ─────────────────────────────────────────── */}
+      <Section title="Pipeline by stage" icon={<TrendingUp className="w-4 h-4" />} link={{ href: "/opportunities", label: "Open opportunities →" }}>
         <div className="rounded-lg bg-white p-4" style={{ border: "1px solid hsl(218 23% 91%)" }}>
           <table className="w-full text-sm">
             <thead style={{ color: "#a3a8b5" }}>
               <tr className="text-left text-xs">
                 <th className="py-1.5 font-medium">Stage</th>
                 <th className="py-1.5 font-medium text-right">Count</th>
-                <th className="py-1.5 font-medium text-right">Value</th>
+                {canSeeValues && <th className="py-1.5 font-medium text-right">Value</th>}
                 <th className="py-1.5 font-medium" style={{ width: "40%" }}>Distribution</th>
               </tr>
             </thead>
@@ -145,7 +185,11 @@ export default function SalesPipelinePage() {
                   <tr key={stage} className="border-t" style={{ borderColor: "hsl(218 23% 93%)" }}>
                     <td className="py-2" style={{ color: "#323338" }}>{stage.replace(/_/g, " ")}</td>
                     <td className="py-2 text-right" style={{ color: "#323338" }}>{count}</td>
-                    <td className="py-2 text-right" style={{ color: "#676879" }}>{count > 0 ? fmt(row?.value ?? 0) : "—"}</td>
+                    {canSeeValues && (
+                      <td className="py-2 text-right" style={{ color: "#676879" }}>
+                        {count > 0 ? fmt(row?.value ?? 0) : "—"}
+                      </td>
+                    )}
                     <td className="py-2 pl-3">
                       <div className="h-2 rounded-full" style={{ background: "hsl(218 23% 93%)" }}>
                         <div className="h-2 rounded-full" style={{ width: `${pct}%`, background: "#0073ea" }} />
@@ -159,62 +203,14 @@ export default function SalesPipelinePage() {
         </div>
       </Section>
 
-      {/* ── Sales Activity Summary ─────────────────────────────────────── */}
-      <Section title="Sales activity (last 7 days)" icon={<Users className="w-4 h-4" />}>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Kpi label="Activities this week" value={data.activitySummary.totalActivitiesThisWeek} colour="#0073ea" />
-          <div className="md:col-span-2 rounded-lg bg-white p-4" style={{ border: "1px solid hsl(218 23% 91%)" }}>
-            <h3 className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "#676879" }}>By salesperson</h3>
-            {data.activitySummary.byOwner.length === 0 ? (
-              <p className="text-sm" style={{ color: "#676879" }}>No activity logged this week.</p>
-            ) : (
-              <ul className="space-y-1.5">
-                {data.activitySummary.byOwner.slice(0, 8).map((u) => {
-                  const max = Math.max(1, ...data.activitySummary.byOwner.map((x) => x.count));
-                  const pct = (u.count / max) * 100;
-                  return (
-                    <li key={u.userId} className="flex items-center gap-3 text-sm">
-                      <span className="w-32 truncate" style={{ color: "#323338" }}>{u.name}</span>
-                      <div className="flex-1 h-2 rounded-full" style={{ background: "hsl(218 23% 93%)" }}>
-                        <div className="h-2 rounded-full" style={{ width: `${pct}%`, background: "#0073ea" }} />
-                      </div>
-                      <span className="w-8 text-right text-xs" style={{ color: "#676879" }}>{u.count}</span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-        </div>
-      </Section>
-
-      {/* ── Follow-up Monitoring ───────────────────────────────────────── */}
-      <Section title="Follow-up monitoring" icon={<AlertCircle className="w-4 h-4" />}>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Kpi label="Overdue next actions"   value={data.followUpMonitoring.overdueNextActions}    colour={data.followUpMonitoring.overdueNextActions > 0 ? "#a52840" : "#00854f"} />
-          <Kpi label="No next action"         value={data.followUpMonitoring.noNextAction}          colour={data.followUpMonitoring.noNextAction > 0 ? "#fdab3d" : "#00854f"} />
-          <Kpi label="Stale 14+ days"         value={data.followUpMonitoring.staleOpportunities14d} colour={data.followUpMonitoring.staleOpportunities14d > 0 ? "#fdab3d" : "#00854f"} />
-          <Kpi label="Stale 30+ days"         value={data.followUpMonitoring.staleOpportunities30d} colour={data.followUpMonitoring.staleOpportunities30d > 0 ? "#a52840" : "#00854f"} />
-        </div>
-      </Section>
-
-      {/* ── Proposal Monitoring ────────────────────────────────────────── */}
-      <Section title="Proposal monitoring" icon={<FileText className="w-4 h-4" />} link={{ href: "/proposals", label: "Open proposals →" }}>
+      {/* ── Needs attention table ─────────────────────────────────────── */}
+      <Section title="Needs attention" icon={<AlertCircle className="w-4 h-4" />} link={{ href: "/opportunities?noNextAction=true", label: "View all →" }}>
         <div className="rounded-lg bg-white p-4" style={{ border: "1px solid hsl(218 23% 91%)" }}>
-          <Kpi label="Proposals sent · no follow-up in 3+ days" value={data.proposalMonitoring.proposalsAwaitingFollowup} colour={data.proposalMonitoring.proposalsAwaitingFollowup > 0 ? "#a52840" : "#00854f"} />
-        </div>
-      </Section>
-
-      {/* ── Closing Forecast ───────────────────────────────────────────── */}
-      <Section title="Closing forecast" icon={<Target className="w-4 h-4" />}>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-          <Kpi label="Closing this month"    value={data.closingForecast.thisMonthCount}   caption={fmt(data.closingForecast.thisMonthValue)} colour="#0073ea" />
-          <Kpi label="Closing this quarter"  value={data.closingForecast.thisQuarterCount} colour="#a25ddc" />
-          <Kpi label="Won this month"        value={data.wonThisMonth.count}               caption={fmt(data.wonThisMonth.value)} colour="#00854f" />
-        </div>
-        {data.closingForecast.thisMonthList.length > 0 && (
-          <div className="rounded-lg bg-white p-4" style={{ border: "1px solid hsl(218 23% 91%)" }}>
-            <h3 className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "#676879" }}>Closing this month</h3>
+          {data.needsAttention.length === 0 ? (
+            <div className="text-sm py-2" style={{ color: "#676879" }}>
+              You&apos;re all caught up — no opportunities need attention right now.
+            </div>
+          ) : (
             <table className="w-full text-sm">
               <thead style={{ color: "#a3a8b5" }}>
                 <tr className="text-left text-xs">
@@ -222,35 +218,52 @@ export default function SalesPipelinePage() {
                   <th className="py-1.5 font-medium">Title</th>
                   <th className="py-1.5 font-medium">Account</th>
                   <th className="py-1.5 font-medium">Owner</th>
-                  <th className="py-1.5 font-medium text-right">Value</th>
-                  <th className="py-1.5 font-medium text-right">Prob.</th>
-                  <th className="py-1.5 font-medium">Expected</th>
+                  <th className="py-1.5 font-medium">Next action</th>
+                  <th className="py-1.5 font-medium">Due</th>
                 </tr>
               </thead>
               <tbody>
-                {data.closingForecast.thisMonthList.map((o) => (
-                  <tr key={o.id} className="border-t" style={{ borderColor: "hsl(218 23% 93%)" }}>
-                    <td className="py-2 font-mono text-xs"><Link href={`/opportunities/${o.id}`} style={{ color: "#0073ea" }}>{o.opportunityCode}</Link></td>
-                    <td className="py-2 truncate max-w-[280px]">{o.title}</td>
-                    <td className="py-2 text-xs" style={{ color: "#676879" }}>{o.account.name}</td>
-                    <td className="py-2 text-xs" style={{ color: "#676879" }}>{o.owner.name}</td>
-                    <td className="py-2 text-right">{fmt(Number(o.estimatedValue ?? 0))}</td>
-                    <td className="py-2 text-right text-xs" style={{ color: "#676879" }}>{o.probabilityPercent ?? "—"}%</td>
-                    <td className="py-2 text-xs" style={{ color: "#676879" }}>{fmtDate(o.expectedAwardDate)}</td>
-                  </tr>
-                ))}
+                {data.needsAttention.map((o) => {
+                  const noAction = !o.nextAction || o.nextAction.trim() === "";
+                  const overdue =
+                    o.nextActionDueDate && new Date(o.nextActionDueDate).getTime() < Date.now();
+                  return (
+                    <tr key={o.id} className="border-t" style={{ borderColor: "hsl(218 23% 93%)" }}>
+                      <td className="py-2 font-mono text-xs">
+                        <Link href={`/opportunities/${o.id}`} style={{ color: "#0073ea" }}>{o.opportunityCode}</Link>
+                      </td>
+                      <td className="py-2 truncate max-w-[260px]">{o.title}</td>
+                      <td className="py-2 text-xs" style={{ color: "#676879" }}>{o.account.name}</td>
+                      <td className="py-2 text-xs" style={{ color: "#676879" }}>{o.owner.name}</td>
+                      <td className="py-2 text-xs" style={{ color: noAction ? "#a52840" : "#323338" }}>
+                        {noAction ? "— no next action —" : o.nextAction}
+                      </td>
+                      <td className="py-2 text-xs" style={{ color: overdue ? "#a52840" : "#676879" }}>
+                        {fmtDate(o.nextActionDueDate)}
+                        {o.nextActionDueDate && (
+                          <span className="ml-1.5 opacity-70">{daysFromNow(o.nextActionDueDate)}</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
-          </div>
-        )}
+          )}
+        </div>
       </Section>
 
-      {/* ── Top 10 ─────────────────────────────────────────────────────── */}
-      <Section title="Top 10 opportunities by value" icon={<Trophy className="w-4 h-4" />}>
-        <div className="rounded-lg bg-white p-4" style={{ border: "1px solid hsl(218 23% 91%)" }}>
-          {data.topOpportunities.length === 0 ? (
-            <p className="text-sm" style={{ color: "#676879" }}>No opportunities yet.</p>
-          ) : (
+      {/* ── Proposals awaiting follow-up (compact mini-section, optional show) ── */}
+      {data.proposalMonitoring.items.length > 0 && (
+        <Section
+          title="Proposals awaiting follow-up"
+          icon={<FileText className="w-4 h-4" />}
+          link={{ href: "/proposals", label: "Open proposals →" }}
+        >
+          <div className="rounded-lg bg-white p-4" style={{ border: "1px solid hsl(218 23% 91%)" }}>
+            <p className="text-xs mb-3" style={{ color: "#676879" }}>
+              No activity logged in the last 7 days for these proposal-stage opportunities.
+            </p>
             <table className="w-full text-sm">
               <thead style={{ color: "#a3a8b5" }}>
                 <tr className="text-left text-xs">
@@ -258,31 +271,29 @@ export default function SalesPipelinePage() {
                   <th className="py-1.5 font-medium">Title</th>
                   <th className="py-1.5 font-medium">Stage</th>
                   <th className="py-1.5 font-medium">Owner</th>
-                  <th className="py-1.5 font-medium text-right">Value</th>
-                  <th className="py-1.5 font-medium text-right">Prob.</th>
                 </tr>
               </thead>
               <tbody>
-                {data.topOpportunities.map((o) => (
+                {data.proposalMonitoring.items.slice(0, 8).map((o) => (
                   <tr key={o.id} className="border-t" style={{ borderColor: "hsl(218 23% 93%)" }}>
-                    <td className="py-2 font-mono text-xs"><Link href={`/opportunities/${o.id}`} style={{ color: "#0073ea" }}>{o.opportunityCode}</Link></td>
-                    <td className="py-2 truncate max-w-[300px]">{o.title}</td>
+                    <td className="py-2 font-mono text-xs">
+                      <Link href={`/opportunities/${o.id}`} style={{ color: "#0073ea" }}>{o.opportunityCode}</Link>
+                    </td>
+                    <td className="py-2 truncate max-w-[280px]">{o.title}</td>
                     <td className="py-2 text-xs" style={{ color: "#676879" }}>{o.stage.replace(/_/g, " ")}</td>
                     <td className="py-2 text-xs" style={{ color: "#676879" }}>{o.owner.name}</td>
-                    <td className="py-2 text-right">{fmt(Number(o.estimatedValue ?? 0))}</td>
-                    <td className="py-2 text-right text-xs" style={{ color: "#676879" }}>{o.probabilityPercent ?? "—"}%</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          )}
-        </div>
-      </Section>
+          </div>
+        </Section>
+      )}
     </div>
   );
 }
 
-// ─── Reusable building blocks (mirror /reports patterns) ────────────────────
+// ─── Reusable building blocks ──────────────────────────────────────────────
 
 function Section({
   title, icon, link, children,
@@ -310,12 +321,32 @@ function Section({
   );
 }
 
-function Kpi({ label, value, caption, colour = "#323338" }: { label: string; value: number | string; caption?: string; colour?: string }) {
-  return (
-    <div className="rounded-lg bg-white p-4" style={{ border: "1px solid hsl(218 23% 91%)" }}>
+const TONE: Record<NonNullable<KpiProps["tone"]>, { value: string; }> = {
+  ok:    { value: "#00854f" },
+  warn:  { value: "#fdab3d" },
+  alert: { value: "#a52840" },
+  none:  { value: "#323338" },
+};
+
+type KpiProps = {
+  label:    string;
+  value:    number | string;
+  caption?: string | undefined;
+  tone?:    "ok" | "warn" | "alert" | "none";
+  link?:    string;
+};
+
+function Kpi({ label, value, caption, tone = "none", link }: KpiProps) {
+  const colour = TONE[tone].value;
+  const inner = (
+    <div
+      className="rounded-lg bg-white p-4 transition hover:shadow-sm"
+      style={{ border: "1px solid hsl(218 23% 91%)" }}
+    >
       <div className="text-xs" style={{ color: "#676879" }}>{label}</div>
       <div className="text-2xl font-semibold mt-1" style={{ color: colour }}>{value}</div>
       {caption && <div className="text-xs mt-0.5" style={{ color: "#a3a8b5" }}>{caption}</div>}
     </div>
   );
+  return link ? <Link href={link} className="block">{inner}</Link> : inner;
 }

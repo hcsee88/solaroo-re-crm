@@ -1,6 +1,10 @@
 # CRM Role Matrix One Page
 
+**Last reviewed:** 2026-05-08
+
 This is a compact management view of what each role is meant to do in the current CRM.
+
+> **2026-05-08 — current direction:** the next module is **Sales Pipeline Monitoring V1** (manual activity logging + next-action discipline + opportunity health + saved views + sales pipeline dashboard + in-app notifications). The new "log sales activity" responsibility lands primarily on **SALES_ENGINEER** (own scope) and **SALES_MANAGER** (team scope). **DIRECTOR**, **PMO_MANAGER**, and **FINANCE_ADMIN** consume the resulting visibility through dashboards. No new sensitive-permission grants — discipline data piggy-backs on existing opportunity/proposal scopes.
 
 Legend:
 

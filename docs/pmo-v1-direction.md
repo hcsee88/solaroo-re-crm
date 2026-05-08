@@ -1,8 +1,11 @@
 # PMO V1 Direction — Solaroo RE CRM
 
 **Document date:** 2026-04-11  
+**Last reviewed:** 2026-05-08  
 **Status:** Adopted — implemented in V1  
 **Author:** Architecture / Product (Pekat Teknologi Sdn Bhd)
+
+> **2026-05-08 update:** PMO V1 is in place and stable. The current next-module priority sits **upstream** of PMO — it's **Sales Pipeline Monitoring V1** (manual activity logging, next-action discipline, opportunity health, sales pipeline dashboard). PMO continues to consume data from CRM unchanged; the new sales-discipline data simply gives PMO a clearer "what's coming downstream" view via the existing reporting surface. See `docs/v1-product-direction.md` for the Sales Pipeline V1 scope. O&M remains deferred.
 
 ---
 

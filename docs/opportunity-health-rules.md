@@ -1,35 +1,40 @@
-# Opportunity Health Rules — V1
+# Opportunity Health Rules — Sales Pipeline Lite
 
-**Date:** 2026-05-08
+**Date:** 2026-05-08 (rewritten for Lite — supersedes the V1 4-state model)
 **Status:** Implemented
 **Source of truth:** `apps/api/src/modules/opportunities/opportunity-health.ts`
 
-This document defines the **exact** rules used to compute the four-state health label of every opportunity. Health is **never stored** — it is computed at read time on the API side and surfaced on the opportunity list, the opportunity detail header, and the sales pipeline dashboard.
+This document defines the **exact** rules used to compute the three-state health label of every opportunity. Health is **never stored** — it is computed at read time on the API side and surfaced on the opportunity list, the opportunity detail header, and the sales pipeline dashboard.
 
 ---
 
-## 1. Why compute, not store
+## 1. Lite scope — three states, no `AT_RISK`
 
-- No worker reconciliation step needed. The dashboard is always fresh.
-- No data drift if a salesperson edits an activity or due date — the health flips on the next read.
-- No migration burden when thresholds are tuned (e.g., changing AT_RISK from 7 to 10 days is a one-line code change, no backfill).
+The original V1 plan had four states (HEALTHY / AT_RISK / STALE / OVERDUE) with 7-day and 14-day thresholds. The Lite revision removes **AT_RISK** and pushes **STALE** to 30 days.
+
+Why:
+
+- The 7-day AT_RISK pill fired too often. Many opps with 7–14 days silence had a future-dated next action and were genuinely fine — the amber pill created noise without actionable signal.
+- A 14-day STALE threshold pressured the team unnecessarily. 30 days is the calm threshold this 15-person team can sustain.
+- Three states are easier to scan in a list view (one happy state, two warning states) than four (where AT_RISK and STALE were visually similar).
+
+The lost AT_RISK signal is partially recovered by the "No next action" filter chip on the opportunity list, which surfaces a different (and more actionable) failure mode.
 
 ---
 
-## 2. The four states
+## 2. The three states
 
-| State | Colour | Meaning |
-|---|---|---|
-| `HEALTHY` | green | Active deal with recent activity and a future-dated next action |
-| `AT_RISK` | amber | No activity for more than 7 days, or no next action recorded |
-| `STALE` | orange | No activity for more than 14 days |
-| `OVERDUE` | red | An open next action whose due date has passed |
+| State | Colour | UI label | Meaning |
+|---|---|---|---|
+| `HEALTHY` | green | "Healthy" | Active deal with recent activity (within 30 days) and no overdue follow-up |
+| `OVERDUE` | red | "Overdue" | An open next action whose due date has passed |
+| `STALE` | amber | **"Needs follow-up"** | No activity for more than 30 days |
+
+The UI label "Needs follow-up" replaces "Stale" because it's action-oriented rather than diagnostic. The enum value stays `STALE` for code stability.
 
 ---
 
 ## 3. Inputs
-
-The function takes only what's already on the opportunity row plus one denormalised value:
 
 ```ts
 {
@@ -42,32 +47,26 @@ The function takes only what's already on the opportunity row plus one denormali
 }
 ```
 
-`lastActivityAt` is computed by the OpportunitiesService once per query (single subquery — see `lastActivityAt(opportunityId)` in `activities.service.ts`).
+`lastActivityAt` is computed by `OpportunitiesService` as part of the standard list query.
 
 ---
 
 ## 4. The decision rules — exact order
 
-The function returns the **first match** in this order. This priority means OVERDUE always wins over STALE, STALE always wins over AT_RISK, etc.
+The function returns the **first match**. Priority means OVERDUE > STALE > HEALTHY.
 
 ```
 1. If stage ∈ {WON, LOST, ON_HOLD}
-       → HEALTHY     // terminal stages have no follow-up obligation
+       → HEALTHY        // terminal stages have no follow-up obligation
 
 2. If next-action is "open" AND nextActionDueDate < now
        → OVERDUE
    "open" = nextActionStatus is neither COMPLETED nor CANCELLED
 
-3. If lastActivityAt is null OR (now - lastActivityAt) > 14 days
+3. If lastActivityAt is null OR (now - lastActivityAt) > 30 days
        → STALE
 
-4. If (now - lastActivityAt) > 7 days
-       → AT_RISK
-
-5. If nextAction is null or empty
-       → AT_RISK     // recent activity but no plan = still at risk
-
-6. Otherwise
+4. Otherwise
        → HEALTHY
 ```
 
@@ -75,24 +74,35 @@ The function returns the **first match** in this order. This priority means OVER
 
 | Stage | Next Action | Due Date | Status | Last Activity | Result | Why |
 |---|---|---|---|---|---|---|
-| `CONCEPT_DESIGN` | "Send revised BoQ" | tomorrow | PENDING | 2 days ago | HEALTHY | recent + future-dated action |
-| `CONCEPT_DESIGN` | "Send revised BoQ" | yesterday | PENDING | 2 days ago | OVERDUE | due date passed wins over recency |
-| `CONCEPT_DESIGN` | "Send revised BoQ" | yesterday | COMPLETED | 2 days ago | HEALTHY | completed action ≠ open |
-| `BUDGETARY_PROPOSAL` | null | — | — | 10 days ago | AT_RISK | no plan + > 7d silent |
-| `BUDGETARY_PROPOSAL` | "Chase for sign-off" | 5d future | PENDING | 18 days ago | STALE | > 14d silent dominates |
+| `CONCEPT_DESIGN` | "Send revised BoQ" | tomorrow | PENDING | 5 days ago | HEALTHY | recent + future-dated action |
+| `CONCEPT_DESIGN` | "Send revised BoQ" | yesterday | PENDING | 5 days ago | OVERDUE | due date passed wins over recency |
+| `CONCEPT_DESIGN` | "Send revised BoQ" | yesterday | COMPLETED | 5 days ago | HEALTHY | completed action ≠ open |
+| `CONCEPT_DESIGN` | "Send revised BoQ" | yesterday | CANCELLED | 5 days ago | HEALTHY | cancelled action ≠ open |
+| `BUDGETARY_PROPOSAL` | null | — | — | 10 days ago | HEALTHY | no plan, but recent activity, < 30d |
+| `BUDGETARY_PROPOSAL` | "Chase for sign-off" | 5d future | PENDING | 35 days ago | STALE | > 30d silent |
 | `WON` | null | — | — | 60 days ago | HEALTHY | terminal stage exits early |
 | `LEAD` | null | — | — | (never) | STALE | null lastActivityAt → infinity |
+
+Note that "no next action" is **not** a health state by itself in Lite — it's surfaced via the opportunity-list filter chip "No next action" instead. This keeps health focused on activity recency + due-date discipline.
 
 ---
 
 ## 5. Constants
 
 ```ts
-const AT_RISK_DAYS = 7;
-const STALE_DAYS   = 14;
+const STALE_DAYS = 30;
 ```
 
 Defined inline in `apps/api/src/modules/opportunities/opportunity-health.ts`. To tune: change the constant, redeploy. No DB migration required.
+
+The worker uses two related constants in `services/worker/src/index.ts`:
+
+```ts
+const NO_ACTIVITY_DAYS          = 30;   // matches the health pill's STALE threshold
+const PROPOSAL_NO_FOLLOWUP_DAYS = 7;    // stage-aware nudge for proposal-stage opps only
+```
+
+The proposal-stage 7-day nudge does not affect the health pill (which stays uniform 30d). It only fires the in-app `proposal_no_followup` notification.
 
 ---
 
@@ -107,7 +117,7 @@ A separate helper, `computeNextActionStatus(...)`, returns one of:
 | `OVERDUE` | open AND `nextActionDueDate < now` |
 | `PENDING` | open AND not overdue (or no due date) |
 
-The opportunity list filter `?nextActionStatus=…` accepts these effective values, not the raw stored ones — so a UI chip "Overdue next action" maps to a single API parameter.
+The opportunity list filter `?nextActionStatus=…` accepts these effective values.
 
 ---
 
@@ -115,47 +125,39 @@ The opportunity list filter `?nextActionStatus=…` accepts these effective valu
 
 | Surface | How |
 |---|---|
-| Opportunity list (`/opportunities`) | New "Health" column; optional filter chip "Overdue" |
+| Opportunity list (`/opportunities`) | Health column with pill |
 | Opportunity detail header | Pill next to the stage badge |
-| Sales pipeline dashboard (`/sales-pipeline`) | Counts surfaced as "Stale opportunities" / "Overdue next actions" / "Active opportunities" / "Won this month" |
+| Sales pipeline dashboard (`/sales-pipeline`) | Counts surfaced as "Stale opportunities" / "Overdue follow-ups" / "Active opportunities" |
 | Opportunity API responses | Both list-item and detail responses include `health` and `effectiveNextActionStatus` |
 
 ---
 
 ## 8. Visibility
 
-Health is **not** considered a sensitive value — it's a computed status, not a commercial number. Any user authorised to view the underlying opportunity can see its health pill. Sensitive value display (margin, CAPEX, pipeline value) follows the existing role-UI rules in `apps/web/src/lib/role-ui.ts` and is unchanged by this module.
+Health is **not** considered a sensitive value — it's a computed status, not a commercial number. Any user authorised to view the underlying opportunity can see its health pill. Sensitive value display (margin, CAPEX, pipeline value) follows the existing role-UI rules in `apps/web/src/lib/role-ui.ts` and is unchanged.
 
 ---
 
 ## 9. Test surface
 
-`opportunity-health.ts` is a **pure function** — no DB, no IO, no clock except via the injectable `now` argument. This makes it trivially testable:
-
-```ts
-import { computeOpportunityHealth } from '...';
-
-it('marks > 14d silent as STALE', () => {
-  expect(
-    computeOpportunityHealth({
-      stage: 'CONCEPT_DESIGN',
-      nextAction: 'x',
-      nextActionDueDate: null,
-      nextActionStatus: 'PENDING',
-      lastActivityAt: new Date('2026-04-01'),
-      now: new Date('2026-05-01'),
-    })
-  ).toBe('STALE');
-});
-```
-
-(Test file is not yet created — flagged as a follow-up in `dev_log/dev_log_260508.txt`.)
+`opportunity-health.ts` is a **pure function** — no DB, no IO, no clock except via the injectable `now` argument. The example table in § 4 is essentially the test plan; unit tests are tracked as a V2 follow-up in `docs/sales-pipeline-lite.md` § 7.
 
 ---
 
-## 10. Out of scope
+## 10. Backwards-compatibility shim
 
-- "Trending" health (e.g. "AT_RISK getting worse for 3 weeks") — V1 is a snapshot, not a trend
-- Per-stage thresholds (every stage uses the same 7d / 14d cutoff)
-- AI-driven health (e.g. ML model trained on win/loss patterns)
+The frontend `<HealthBadge>` component remaps any incoming `AT_RISK` value to `STALE` for one rolling-deploy cycle. This protects against:
+
+- Stale pages cached in the user's browser still expecting the old enum
+- Any external consumer (none today) still asking for `AT_RISK`
+
+The shim should be removed in the next sprint.
+
+---
+
+## 11. Out of scope (V2 candidates)
+
+- Per-stage thresholds for the health pill (currently uniform 30d)
+- "Trending" health (e.g. "Stale getting worse for 3 weeks")
+- AI-driven health (ML-based win-likelihood)
 - User-customisable thresholds

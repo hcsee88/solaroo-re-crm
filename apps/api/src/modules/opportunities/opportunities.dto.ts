@@ -94,6 +94,9 @@ export const OpportunityQuerySchema = z.object({
   highValue:                   z.coerce.boolean().optional(),  // estimatedValue >= 1,000,000 (configurable later)
   wonThisMonth:                z.coerce.boolean().optional(),  // stage=WON && updatedAt this month
   lostThisMonth:               z.coerce.boolean().optional(),  // stage=LOST && updatedAt this month
+  // All-time stage filters (Sales Pipeline Lite, 2026-05-08).
+  won:                         z.coerce.boolean().optional(),  // stage=WON (all time)
+  lost:                        z.coerce.boolean().optional(),  // stage=LOST (all time)
   nextActionStatus:            z.enum(NEXT_ACTION_EFFECTIVE_STATUSES).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(500).default(25),

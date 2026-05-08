@@ -274,9 +274,10 @@ export type OpportunityStageHistory = {
   changedAt: string;
 };
 
-// V1 sales pipeline computed fields shared by list + detail
-export type OpportunityHealth = 'HEALTHY' | 'AT_RISK' | 'STALE' | 'OVERDUE';
-export type EffectiveNextActionStatus = 'PENDING' | 'COMPLETED' | 'OVERDUE' | 'NONE';
+// Sales Pipeline Lite computed fields shared by list + detail.
+// (2026-05-08: AT_RISK removed — created noise without actionable signal.)
+export type OpportunityHealth = 'HEALTHY' | 'STALE' | 'OVERDUE';
+export type EffectiveNextActionStatus = 'PENDING' | 'COMPLETED' | 'CANCELLED' | 'OVERDUE' | 'NONE';
 export type NextActionTypeValue =
   | 'FOLLOW_UP' | 'SITE_SURVEY' | 'REVISED_QUOTATION'
   | 'CLIENT_MEETING' | 'INTERNAL_REVIEW' | 'OTHER';

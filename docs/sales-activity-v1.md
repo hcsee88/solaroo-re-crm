@@ -1,8 +1,10 @@
-# Sales Activity V1 — Specification
+# Sales Activity — Specification (Sales Pipeline Lite)
 
-**Date:** 2026-05-08
+**Date:** 2026-05-08 (current scope: Sales Pipeline Lite)
 **Status:** Implemented
 **Source of truth:** `apps/api/src/modules/activities/`, `packages/db/prisma/schema/crm.prisma` (`Activity`, `ActivityType`, `NextActionStatus`)
+
+> **Lite-scope note (2026-05-08):** This document is current under Sales Pipeline Lite. The activity module itself was unchanged by the Lite revision — it was already lightweight. The umbrella scope decision (what was kept vs cut) is documented in `docs/sales-pipeline-lite.md`.
 
 This document defines the **Sales Activity** module — the manual logging layer that gives the CRM a sales operating rhythm without integrating with email, WhatsApp, telephony, calendar, or AI.
 

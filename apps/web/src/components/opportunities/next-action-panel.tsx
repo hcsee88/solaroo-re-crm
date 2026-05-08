@@ -4,7 +4,10 @@ import { useEffect, useState } from "react";
 import { Target, CheckCircle2, AlertCircle, Edit3, X } from "lucide-react";
 import { get, patch } from "@/lib/api-client";
 
-type EffectiveStatus = "PENDING" | "COMPLETED" | "OVERDUE" | "NONE";
+// CANCELLED added in Sales Pipeline Lite (2026-05-08) — UI treats it like NONE
+// (no badge, no due-date emphasis), but keeping it in the union here for type
+// compatibility with the shared EffectiveNextActionStatus type.
+type EffectiveStatus = "PENDING" | "COMPLETED" | "CANCELLED" | "OVERDUE" | "NONE";
 
 type NextActionType =
   | "FOLLOW_UP" | "SITE_SURVEY" | "REVISED_QUOTATION"
@@ -114,7 +117,9 @@ export function NextActionPanel({
       case "OVERDUE":   return { label: "Overdue",   bg: "hsl(354 70% 92%)", fg: "#a52840", Icon: AlertCircle };
       case "PENDING":   return { label: "Pending",   bg: "hsl(213 100% 95%)", fg: "#0073ea", Icon: Target };
       case "COMPLETED": return { label: "Completed", bg: "hsl(146 65% 92%)", fg: "#00854f", Icon: CheckCircle2 };
+      case "CANCELLED": return { label: "Cancelled", bg: "hsl(218 23% 93%)", fg: "#676879", Icon: X };
       case "NONE":      return { label: "Not set",   bg: "hsl(218 23% 93%)", fg: "#676879", Icon: Target };
+      default:          return { label: "Not set",   bg: "hsl(218 23% 93%)", fg: "#676879", Icon: Target };
     }
   })();
 

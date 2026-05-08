@@ -174,7 +174,7 @@ function OpportunitiesPageContent() {
 
       {/* Overdue alert banner */}
       {overdueOnly && (
-        <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-800 px-4 py-3">
+        <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/20 dark:border-red-800 px-4 py-2">
           <span className="text-sm font-medium text-red-700 dark:text-red-300">
             ⚠ Overdue filter active — showing only opportunities with a missed next action deadline
           </span>
@@ -195,12 +195,16 @@ function OpportunitiesPageContent() {
           setStageFilter(((f.stageFilter as string) ?? "") as OpportunityStageValue | "");
           setOverdueOnly(Boolean(f.overdueOnly));
           setSearch((f.search as string) ?? "");
-          // Restore sales-pipeline chip state
+          // Restore sales-pipeline chip state. Lite scope (2026-05-08) — pre-Lite
+          // saved views may also reference closingThisMonth / closingThisQuarter /
+          // noActivity14d; we silently drop those here (the API ignores them too).
           const next: Record<string, boolean> = {};
           for (const k of [
-            "myOnly", "mineAsDesignEngineer", "closingThisMonth", "closingThisQuarter",
-            "noNextAction", "overdueNextAction", "noActivity14d", "noActivity30d",
-            "proposalSubmitted", "highValue", "wonThisMonth", "lostThisMonth",
+            "myOnly", "mineAsDesignEngineer",
+            "noNextAction", "overdueNextAction", "noActivity30d",
+            "proposalSubmitted", "highValue",
+            "wonThisMonth", "lostThisMonth",
+            "won", "lost",
           ]) {
             if (f[k]) next[k] = true;
           }
@@ -209,21 +213,29 @@ function OpportunitiesPageContent() {
         }}
       />
 
-      {/* V1 Sales pipeline filter chips */}
+      {/* Sales Pipeline Lite filter chips (2026-05-08).
+       *   Removed: closingThisMonth, closingThisQuarter, noActivity14d
+       *     — see docs/sales-pipeline-lite.md (calmer scope, no closing pressure).
+       *   Kept: myOnly, mineAsDesignEngineer, noNextAction, overdueNextAction,
+       *     noActivity30d (relabelled "Stale 30 days"), proposalSubmitted,
+       *     highValue, wonThisMonth, lostThisMonth.
+       *   Added: won, lost — all-time stage filters per Q3/C2.
+       *
+       *   Saved views with the removed keys still load (the API silently
+       *   ignores unknown filter keys via Zod's strip behaviour). */}
       <div className="flex gap-1.5 overflow-x-auto pb-1 flex-wrap text-xs">
         {[
           { key: "myOnly",              label: "My opportunities" },
           { key: "mineAsDesignEngineer", label: "Designed by me" },
-          { key: "closingThisMonth",    label: "Closing this month" },
-          { key: "closingThisQuarter",  label: "Closing this quarter" },
           { key: "noNextAction",        label: "No next action" },
-          { key: "overdueNextAction",   label: "Overdue next action" },
-          { key: "noActivity14d",       label: "No activity 14d" },
-          { key: "noActivity30d",       label: "No activity 30d" },
+          { key: "overdueNextAction",   label: "Overdue follow-up" },
+          { key: "noActivity30d",       label: "Stale 30 days" },
           { key: "proposalSubmitted",   label: "Proposal submitted" },
           { key: "highValue",           label: "High value (≥1M)" },
           { key: "wonThisMonth",        label: "Won this month" },
           { key: "lostThisMonth",       label: "Lost this month" },
+          { key: "won",                 label: "Won" },
+          { key: "lost",                label: "Lost" },
         ].map(({ key, label }) => {
           const active = !!salesFilters[key];
           return (
@@ -323,7 +335,7 @@ function OpportunitiesPageContent() {
       </div>
 
       {error && (
-        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-2 text-sm text-destructive">{error}</div>
       )}
 
       {/* Table */}
@@ -332,15 +344,15 @@ function OpportunitiesPageContent() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/50">
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Code</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Title</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Stage</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Health</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Next Action</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Account</th>
-                {showValue && <th className="px-4 py-3 text-right font-medium text-muted-foreground">Value</th>}
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Owner</th>
-                <th className="px-4 py-3 text-left font-medium text-muted-foreground">Design Eng</th>
+                <th className="px-4 py-2 text-left font-medium text-muted-foreground">Code</th>
+                <th className="px-4 py-2 text-left font-medium text-muted-foreground">Title</th>
+                <th className="px-4 py-2 text-left font-medium text-muted-foreground">Stage</th>
+                <th className="px-4 py-2 text-left font-medium text-muted-foreground">Health</th>
+                <th className="px-4 py-2 text-left font-medium text-muted-foreground">Next Action</th>
+                <th className="px-4 py-2 text-left font-medium text-muted-foreground">Account</th>
+                {showValue && <th className="px-4 py-2 text-right font-medium text-muted-foreground">Value</th>}
+                <th className="px-4 py-2 text-left font-medium text-muted-foreground">Owner</th>
+                <th className="px-4 py-2 text-left font-medium text-muted-foreground">Design Eng</th>
               </tr>
             </thead>
             <tbody>
@@ -348,7 +360,7 @@ function OpportunitiesPageContent() {
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="border-b">
                     {Array.from({ length: colCount }).map((_, j) => (
-                      <td key={j} className="px-4 py-3">
+                      <td key={j} className="px-4 py-2">
                         <div className="h-4 w-full animate-pulse rounded bg-muted" />
                       </td>
                     ))}
@@ -375,38 +387,43 @@ function OpportunitiesPageContent() {
                         isOverdue ? "bg-red-50/50 dark:bg-red-950/10 hover:bg-red-50 dark:hover:bg-red-950/20" : "hover:bg-muted/30"
                       }`}
                     >
-                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{opp.opportunityCode}</td>
-                      <td className="px-4 py-3 font-medium">
-                        <Link href={`/opportunities/${opp.id}`} className="hover:text-primary hover:underline">
+                      <td className="px-4 py-2 font-mono text-xs text-muted-foreground">{opp.opportunityCode}</td>
+                      <td className="px-4 py-2 font-medium">
+                        {/* Lite (2026-05-08): single-line title for tight rows.
+                            Site name moved to the detail page header. */}
+                        <Link
+                          href={`/opportunities/${opp.id}`}
+                          className="hover:text-primary hover:underline truncate inline-block max-w-[260px] align-middle"
+                          title={`${opp.title} · ${opp.site.name}`}
+                        >
                           {opp.title}
                         </Link>
-                        <p className="text-xs text-muted-foreground mt-0.5">{opp.site.name}</p>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-2">
                         <StageBadge stage={opp.stage} />
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-2">
                         {opp.health
                           ? <HealthBadge health={opp.health as Health} />
                           : <span className="text-muted-foreground">—</span>}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-2">
                         <NextActionCell opp={opp} />
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-2">
                         <Link href={`/accounts/${opp.account.id}`} className="hover:text-primary hover:underline">
                           {opp.account.name}
                         </Link>
                       </td>
                       {showValue && (
-                        <td className="px-4 py-3 text-right tabular-nums font-medium">
+                        <td className="px-4 py-2 text-right tabular-nums font-medium">
                           {formatMYR(opp.estimatedValue)}
                         </td>
                       )}
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                      <td className="px-4 py-2 text-xs text-muted-foreground">
                         {opp.owner.name}
                       </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                      <td className="px-4 py-2 text-xs text-muted-foreground">
                         {opp.designEngineer?.name ?? <span className="opacity-50">—</span>}
                       </td>
                     </tr>
@@ -418,7 +435,7 @@ function OpportunitiesPageContent() {
         </div>
 
         {totalPages > 1 && (
-          <div className="flex items-center justify-between border-t px-4 py-3">
+          <div className="flex items-center justify-between border-t px-4 py-2">
             <span className="text-sm text-muted-foreground">Page {page} of {totalPages}</span>
             <div className="flex gap-2">
               <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="rounded-md border px-3 py-1.5 text-sm disabled:opacity-40 hover:bg-muted">Previous</button>

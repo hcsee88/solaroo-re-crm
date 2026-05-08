@@ -1,6 +1,6 @@
-# Sales Pipeline Dashboard V1 — Specification
+# Sales Pipeline Dashboard — Specification
 
-**Date:** 2026-05-08
+**Date:** 2026-05-08 (rewritten for Sales Pipeline Lite — supersedes the V1 8-section dashboard)
 **Status:** Implemented
 **Page:** `/sales-pipeline`
 **Source of truth:** `apps/api/src/modules/reporting/reporting.service.ts` (`getSalesPipelineMetrics`), `apps/web/src/app/(app)/sales-pipeline/page.tsx`
@@ -11,15 +11,17 @@ This document defines what the sales pipeline dashboard shows, how each KPI is c
 
 ## 1. Purpose
 
-Give Director, Sales Manager, and Sales Engineer one screen that answers:
+Help Director, Sales Manager, and Sales Engineer answer one question:
 
-- How much pipeline do we have, and where is it bunching?
-- Who's chasing what, and who's idle?
-- Which deals are overdue or stalling?
-- What's about to close this month / quarter?
-- What did we win this month?
+> **What needs my attention today?**
 
-If a question can be answered from this page, the user should not need to open the opportunities list to answer it.
+The dashboard does **not** answer:
+
+- "How much will we close this month?" (forecast pressure removed)
+- "Who is the most active salesperson?" (ranking removed)
+- "What's our weighted pipeline value?" (forecast removed)
+
+If a section doesn't directly help someone decide what to do today, it's not on the dashboard.
 
 ---
 
@@ -31,154 +33,161 @@ Visible in the sidebar to:
 - `SALES_MANAGER`
 - `SALES_ENGINEER`
 
-Not visible to:
+Not visible to other roles (PMO / project / procurement / O&M / finance use other dashboards).
 
-- `SUPER_ADMIN` (no business workspace)
-- `PROJECT_MANAGER` / `PROJECT_ENGINEER` / `DESIGN_LEAD` / `DESIGN_ENGINEER` / `PROCUREMENT` / `SITE_SUPERVISOR` / `COMMISSIONING_ENGINEER` / `OM_ENGINEER` / `FINANCE_ADMIN` (PMO dashboard / project workspace are their primary surfaces)
+The page route is gated by `getNavItemsForRole(...)` in `apps/web/src/lib/role-ui.ts`. The underlying reporting endpoint requires only authentication; data is filtered by the caller's `opportunity:view` scope (own / team / all).
 
-The page route itself is gated by `getNavItemsForRole(...)` in `apps/web/src/lib/role-ui.ts`. If a role outside the visible set navigates to the URL directly, the API still responds (the underlying reporting endpoint requires only authentication), but their pipeline data is filtered to their scope (a `SALES_ENGINEER` sees only their own opportunities).
+### Sensitive-value display
 
-### Sensitive value display
-
-Pipeline value (RM totals) and per-owner totals are sensitive. The display layer respects the existing rules in `apps/web/src/lib/role-ui.ts`:
+Pipeline value (RM totals) is sensitive. Display layer respects the existing rules in `apps/web/src/lib/role-ui.ts`:
 
 | Section | DIRECTOR | SALES_MANAGER | SALES_ENGINEER |
 |---|---|---|---|
-| Pipeline summary value | ✅ shown | ✅ shown | ❌ hidden (count only) |
-| By-stage value | ✅ shown | ✅ shown | ❌ hidden (count only) |
-| Closing forecast value | ✅ shown | ✅ shown | ❌ hidden (count only) |
-| Top 10 largest open opps | ✅ shown | ✅ shown | ❌ hidden (count only) |
-| Won this month value | ✅ shown | ✅ shown | ❌ hidden (count only) |
-| Activity counts / overdue counts / stale counts | ✅ shown to all three roles |
+| Active-opportunities total value caption | ✅ shown | ✅ shown | ❌ hidden (count only) |
+| Pipeline-by-stage `Value` column | ✅ shown | ✅ shown | ❌ hidden (column omitted) |
+| All other counts | ✅ shown to all three roles |
 
-The reasoning: a sales engineer may be a contractor or junior, and should not see the team's commercial totals. Their own deal value is visible on their own opportunity detail pages (existing rule).
+> **Known limitation (V2 follow-up).** The API still returns the value figures regardless of role; the UI hides them client-side. Server-side filtering is tracked as a defence-in-depth follow-up. Documented in `docs/sales-pipeline-lite.md` § 7.
 
 ---
 
-## 3. Quick cards (top of page)
+## 3. Layout — three sections
 
-Six small cards. Each shows a count and a click-through label.
+### 3.1 Five quick cards (top of page)
+
+Each card shows a count, optional caption, and click-through link.
 
 | Card | Definition | Click target |
 |---|---|---|
-| **Active Opportunities** | `count where stage NOT IN (WON, LOST, ON_HOLD) AND isActive = true`, in user's scope | `/opportunities?myOnly=true` (or unfiltered for managers) |
-| **Overdue Next Actions** | `count where nextActionStatus = PENDING AND nextActionDueDate < now`, in user's scope | `/opportunities?overdueNextAction=true` |
-| **Stale Opportunities** | `count where stage NOT IN (WON, LOST, ON_HOLD) AND lastActivityAt is null OR > 14 days ago`, in user's scope | `/opportunities?noActivity30d=true` |
-| **Closing This Month** | `count where stage NOT IN (WON, LOST, ON_HOLD) AND expectedAwardDate within current month` | `/opportunities?closingThisMonth=true` |
-| **Proposal Follow-ups Due** | `count where stage IN (BUDGETARY_PROPOSAL, FIRM_PROPOSAL) AND no activity in past 3 days` | `/opportunities?proposalSubmitted=true&noActivity14d=true` |
-| **Won This Month** | `count where stage = WON AND updatedAt within current month` | `/opportunities?wonThisMonth=true` |
+| **Active opportunities** | `count where stage NOT IN (WON, LOST) AND isActive = true`, in user's scope. Caption shows total pipeline value (DIRECTOR / SALES_MANAGER only). | `/opportunities` |
+| **No next action** | `count where nextAction IS NULL OR nextAction = ''`, live opps only | `/opportunities?noNextAction=true` |
+| **Overdue follow-ups** | `count where nextActionStatus = PENDING AND nextActionDueDate < now`, live opps only | `/opportunities?overdueNextAction=true` |
+| **Stale (30+ days)** | `count where stage NOT IN (WON, LOST) AND lastActivityAt is null OR > 30 days ago` | `/opportunities?noActivity30d=true` |
+| **Proposals awaiting follow-up** | `count where stage IN (BUDGETARY_PROPOSAL, FIRM_PROPOSAL) AND no activity in past 7 days` | `/opportunities?proposalSubmitted=true` |
+
+Tone:
+
+- Green when 0 (good outcome)
+- Amber when > 0 for "no next action" / "stale" / "proposals awaiting follow-up"
+- Red when > 0 for "overdue follow-ups"
+- Default neutral colour for "Active opportunities"
 
 ---
 
-## 4. Charts
+### 3.2 Pipeline-by-Stage breakdown
 
-### Pipeline by Stage
+Single table, one row per stage in canonical order:
 
-Horizontal bar chart, one bar per stage. X-axis: count of opportunities; tooltip shows weighted value (count × estimatedValue × probabilityPercent / 100, summed). Stage order matches `OpportunityStage` enum order.
+| Column | Type | Notes |
+|---|---|---|
+| Stage | text | enum value, underscores → spaces |
+| Count | int | open opps only (excludes WON / LOST) |
+| Value | RM | sum of `estimatedValue` per stage. **Hidden for SALES_ENGINEER.** |
+| Distribution | bar | proportional to max count across stages |
 
-Backend: `getSalesPipelineMetrics().stageBreakdown`.
-
-### Pipeline by Owner
-
-> ❗ **Not in V1.** Identified during the V1 audit as the only spec section not yet built. Tracked as a V2 follow-up — the existing reporting.service can be extended with a `groupBy: ownerUserId` query in one place. See dev log 2026-05-08.
-
-### Won vs Lost This Month
-
-Two stacked counts (and values, for managers). Compares activity in the current calendar month only.
-
-Backend: `getSalesPipelineMetrics().wonThisMonth` plus a parallel `lostThisMonth` query.
-
-### Activity Volume This Month
-
-Bar chart by activity type. Shows how many `CALL` / `EMAIL` / `WHATSAPP` / `MEETING` / `SITE_VISIT` / `PROPOSAL_FOLLOW_UP` / `GENERAL_NOTE` activities have been logged this month, in user's scope. Useful for spotting under-loggers.
-
-Backend: `getSalesPipelineMetrics().activitySummary`.
+No filter UI on this section — it's a calm orientation snapshot. To drill in, click "Open opportunities →" link in the section header.
 
 ---
 
-## 5. Tables
+### 3.3 Needs-attention table
 
-### Overdue Opportunities
+The action surface. Lists opps that match either:
 
-| Column | Source |
-|---|---|
-| Code | `Opportunity.opportunityCode` |
-| Title | `Opportunity.title` |
-| Stage | `Opportunity.stage` |
-| Owner | `Opportunity.owner.name` |
-| Next Action | `Opportunity.nextAction` |
-| Due | `Opportunity.nextActionDueDate` (red if past) |
-| Days overdue | computed |
+- `nextActionStatus = PENDING AND nextActionDueDate < now` (overdue), OR
+- `nextAction IS NULL OR nextAction = ''` (no next action)
 
-Sorted by days-overdue descending. Limit 10.
-
-Backend: `getSalesPipelineMetrics().followUpMonitoring`.
-
-### No Next Action
-
-Live opps with `nextAction IS NULL OR nextAction = ''`. Same column shape as Overdue, minus the Due column.
-
-Sorted by `updatedAt` ascending (oldest neglect first). Limit 10.
-
-### Top 10 Largest Open Opportunities
-
-Live opps (stage NOT IN WON/LOST/ON_HOLD) sorted by `estimatedValue DESC`, limit 10.
+Limited to 20 rows. Sorted by `nextActionDueDate ASC` then `updatedAt ASC` (oldest neglect first).
 
 | Column | Source |
 |---|---|
-| Code | `Opportunity.opportunityCode` |
+| Code | `Opportunity.opportunityCode` (link to detail) |
 | Title | `Opportunity.title` |
-| Stage | `Opportunity.stage` |
 | Account | `Opportunity.account.name` |
-| Value | `Opportunity.estimatedValue` (hidden for SALES_ENGINEER) |
 | Owner | `Opportunity.owner.name` |
+| Next action | `Opportunity.nextAction` — shown red if "— no next action —" |
+| Due | `Opportunity.nextActionDueDate` + relative-time pill ("3d overdue" in red, "in 2d" neutral) |
 
-Backend: `getSalesPipelineMetrics().topOpportunities`.
+Empty state: *"You're all caught up — no opportunities need attention right now."*
 
 ---
 
-## 6. API contract
+### 3.4 (Optional) Proposals-awaiting-follow-up table
+
+Shown only when `proposalMonitoring.items.length > 0`. Compact, max 8 rows. Same shape as Needs Attention but filtered to proposal-stage opps with no activity in 7+ days.
+
+If the count is 0, the section is hidden entirely (less visual noise on a quiet dashboard).
+
+---
+
+## 4. What's NOT on the Lite dashboard
+
+These were on the V1 dashboard and **deliberately removed**:
+
+| Removed | Why |
+|---|---|
+| Closing-this-month / closing-this-quarter forecast | Closing pressure not appropriate for our team size |
+| Weighted pipeline value | Same reason |
+| Activity volume by salesperson | Felt like ranking |
+| Top 10 by value | Pulled focus toward big-deal worship |
+| Per-week activity total | Surfaced via the bell + existing notifications instead |
+
+The motto: **calm and operational**. Every removed section was checked against "does this directly help someone decide what to do today?" — they didn't.
+
+---
+
+## 5. API contract
 
 ```
 GET /api/reporting/sales-pipeline
 ```
 
-Authenticated; no extra permission required. Returns scope-filtered data based on the caller's `opportunity:view` permission scope (own / team / all).
+Authenticated; no extra permission required. Returns scope-filtered data based on the caller's `opportunity:view` permission scope.
 
-Response (abridged):
+Response:
 
 ```jsonc
 {
-  "pipelineSummary":     { "openCount": 23, "weightedValue": 4_550_000, "avgDealSize": 197_826 },
-  "stageBreakdown":      [{ "stage": "LEAD", "count": 4, "value": 800_000 }, /* ... */ ],
-  "activitySummary":     { "thisMonth": { "CALL": 12, "EMAIL": 23, /* ... */ }, "lastMonth": { /* ... */ } },
-  "followUpMonitoring":  { "overdueCount": 3, "items": [/* opp summaries */] },
-  "proposalMonitoring":  { "noFollowupCount": 2, "items": [/* opp summaries */] },
-  "closingForecast":     { "thisMonth": { "count": 5, "value": 950_000 }, "thisQuarter": { /* */ } },
-  "topOpportunities":    [/* up to 10 opp summaries */],
-  "wonThisMonth":        { "count": 2, "value": 480_000 }
+  "pipelineSummary": {
+    "totalActiveOpportunities": 23,
+    "totalPipelineValue":       4_550_000,
+    "weightedPipelineValue":    1_980_000,   // computed but not rendered in Lite UI
+    "averageDealSize":          197_826      // computed but not rendered in Lite UI
+  },
+  "stageBreakdown":     [{ "stage": "LEAD", "count": 4, "value": 800_000 }, /* ... */],
+  "followUpMonitoring": {
+    "overdueNextActions":     3,
+    "noNextAction":           5,
+    "staleOpportunities30d":  2
+  },
+  "proposalMonitoring": {
+    "proposalsAwaitingFollowup": 1,
+    "items": [/* up to 20 opp summaries */]
+  },
+  "needsAttention":  [/* up to 20 opp summaries */],
+  "topOpportunities": [/* up to 10 — present in payload, not rendered in Lite */],
+  "wonThisMonth":     { "count": 2, "value": 480_000 },     // present, not rendered
+  "generatedAt":      "2026-05-08T08:00:00.000Z"
 }
 ```
 
-Sensitive numeric fields are returned by the API regardless of role; the UI hides them client-side per `role-ui.ts`. (This is a defence-in-depth gap that may be tightened in V2 — see follow-up below.)
+`topOpportunities` and `wonThisMonth` remain in the payload for potential future use and existing list-page links; the Lite UI does not render them as dashboard sections.
+
+`activitySummary` and `closingForecast` were **removed from the payload** (Q5/E1) — clean payload, no external consumers.
 
 ---
 
-## 7. Refresh behaviour
+## 6. Refresh behaviour
 
-- The dashboard is a server-fetched page (Next.js App Router server component on first render, then SWR-style client refresh).
-- It re-fetches on focus and on a 60-second interval.
-- All numbers are point-in-time — no caching layer beyond Next.js's default fetch dedupe.
-- "What did I just log?" is reflected on next refresh; the activity timeline on the opportunity detail page reflects immediately because it's its own SWR query.
+- Server-fetched page (Next.js client component using `apiClient.get`).
+- Re-fetches on focus.
+- All numbers are point-in-time.
 
 ---
 
-## 8. Out of scope for V1
+## 7. Out of scope for Lite (V2 candidates)
 
-- Custom date ranges (everything is "this month" / "this quarter" / "all open")
-- Per-team subdivision (one Sales Manager sees their team aggregate; cross-team comparison is Director-only and reads as a single number)
-- Forecasting beyond the current quarter
-- Drill-down from chart click into an opp list (each card has a click-through, but charts do not)
-- Export to CSV / Excel (use the Reports page for that — `/reports`)
-- Pipeline by Owner chart (V2 — see § 4)
-- Server-side enforcement of sensitive-value visibility (V2 — currently UI-side only)
+- **Pipeline by Owner** chart (one extra `groupBy: ownerUserId` query)
+- **Server-side enforcement** of sensitive-value visibility
+- **Date-range selectors** (currently hard-coded "live opps" / "this month")
+- **Drill-down from chart click** into a filtered list (cards already drill in; charts don't)
+- **Export to CSV** (use `/reports` for that)
