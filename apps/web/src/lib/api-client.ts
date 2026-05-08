@@ -32,7 +32,19 @@ apiClient.interceptors.response.use(
         window.location.href = "/forbidden";
       }
     }
-    return Promise.reject(error);
+    // Re-throw an Error whose .message is the server-side error message
+    // (extracted from the API's standard { success:false, error:{ message } } envelope).
+    // This makes try/catch in pages show the actual reason instead of axios's
+    // generic "Request failed with status code 400".
+    const serverMsg =
+      error?.response?.data?.error?.message ??
+      error?.response?.data?.message ??
+      error?.message ??
+      "Request failed";
+    const wrapped: Error & { status?: number; original?: unknown } = new Error(serverMsg);
+    wrapped.status = error?.response?.status;
+    wrapped.original = error;
+    return Promise.reject(wrapped);
   }
 );
 
