@@ -13,7 +13,9 @@ A project-lifecycle CRM for off-grid solar, hybrid solar-diesel, and BESS projec
 The company delivers off-grid solar and BESS projects. Typical customers include plantations, islands, resorts, C&I facilities, rural sites, and weak-grid users. Projects may involve diesel displacement, solar hybridization, microgrid design, and peak shaving BESS.
 
 ## Core lifecycle
-Account → Site → Opportunity → Proposal → Contract → Project → Commissioning → Asset Register → O&M
+Account → Contact → Site → Opportunity → Activity / Next Action → Proposal → Contract → Project → Commissioning → Asset Register → O&M
+
+> **2026-05-08 — sales discipline layer:** the `Activity / Next Action` stop is part of Sales Pipeline Monitoring V1. Activities are manual CRM records (call / email / WhatsApp / meeting / site visit / proposal follow-up / general note). They are not integrated with email / WhatsApp / telephony / calendar / AI in V1. See `docs/sales-activity-v1.md`, `docs/opportunity-health-rules.md`, and `docs/sales-dashboard-v1.md`.
 
 ## Team size
 15 users now. Expected to double in ~2 years. Design for ~30 concurrent users.
@@ -186,6 +188,34 @@ Account → Site → Opportunity → Proposal → Contract → Project → Commi
 8. Dashboards
 9. Procurement
 10. O&M module
+
+---
+
+## Current recommendation (2026-05-08)
+
+**Next priority: Sales Pipeline Monitoring V1 — not O&M yet.**
+
+Items 1–9 of the MVP build order are substantially in place (auth, accounts/contacts/sites, opportunities, proposals + versions, contracts + handover, project gates, documents, PMO dashboard, procurement, reports). O&M (item 10) remains important but is **deferred**.
+
+Reason: the system holds opportunity and proposal records, but the **sales operating rhythm is still weak**. Management lacks daily visibility into overdue follow-ups, stale opportunities, opportunities without a next action, proposal follow-up status, salesperson activity, expected close dates, pipeline forecast, and overall sales pipeline health. This must be tightened before expanding the post-commissioning lifecycle.
+
+**Important product decision — manual only in V1.**
+
+Sales activity tracking remains **manual logging only**. Do **not** introduce email / WhatsApp / call / Outlook / Gmail / telephony / calendar / AI integrations for V1. Salespeople perform actions outside the CRM (call, email, WhatsApp, meeting, site visit) and then manually log them as activity records. The discipline tool is the **next-action due date**, surfaced by health indicators on every opportunity.
+
+**Recommended build sequence:**
+
+1. Sales Activity Logging — manual only
+2. Opportunity Next Action Tracking
+3. Opportunity Health Indicators
+4. Opportunity List Filters + Saved Views
+5. Sales Pipeline Dashboard
+6. Sales Notification Hook Points (in-app only)
+7. Demo Fixture Data
+8. Mobile Site Supervisor UX
+9. O&M Module
+
+See `docs/v1-product-direction.md` and `dev_log/dev_log_260508.txt` for full rationale.
 
 ---
 

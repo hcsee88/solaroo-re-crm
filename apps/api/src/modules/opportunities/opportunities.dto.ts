@@ -14,9 +14,12 @@ const NEXT_ACTION_TYPES = [
   'FOLLOW_UP', 'SITE_SURVEY', 'REVISED_QUOTATION', 'CLIENT_MEETING', 'INTERNAL_REVIEW', 'OTHER',
 ] as const;
 
-const NEXT_ACTION_STATUSES = ['PENDING', 'COMPLETED'] as const;
-// Effective status (computed): adds OVERDUE = (PENDING && due in past)
-const NEXT_ACTION_EFFECTIVE_STATUSES = ['PENDING', 'COMPLETED', 'OVERDUE'] as const;
+// Stored statuses on Opportunity. CANCELLED added in V1 sales pipeline (2026-05-08)
+// for explicit "won't do" closure separate from COMPLETED.
+const NEXT_ACTION_STATUSES = ['PENDING', 'COMPLETED', 'CANCELLED'] as const;
+// Effective status (computed): adds OVERDUE = (PENDING && due in past),
+// and NONE for opps with no next action set (or CANCELLED).
+const NEXT_ACTION_EFFECTIVE_STATUSES = ['PENDING', 'COMPLETED', 'CANCELLED', 'OVERDUE', 'NONE'] as const;
 
 export const CreateOpportunitySchema = z.object({
   title: z.string().min(1).max(255),

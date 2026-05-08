@@ -244,9 +244,15 @@ enum NextActionType {
 // Stored next-action status. OVERDUE is computed at read time
 // (status===PENDING && nextActionDueDate < now) so UI is always fresh
 // without a worker reconciliation step.
+//
+// V1 mapping (see docs/sales-activity-v1.md):
+//   PENDING   = "OPEN"      — outstanding, awaiting action
+//   COMPLETED = "DONE"      — action carried out
+//   CANCELLED = "CANCELLED" — abandoned without completion
 enum NextActionStatus {
   PENDING
   COMPLETED
+  CANCELLED
 }
 
 model Activity {

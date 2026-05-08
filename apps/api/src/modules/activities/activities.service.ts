@@ -162,11 +162,30 @@ export class ActivitiesService {
   }
 
   // ─── Update ────────────────────────────────────────────────────────────
+  // V1 rule (see docs/sales-activity-v1.md):
+  //   - Activity timeline is immutable history.
+  //   - Edits allowed by the creator ONLY on the same calendar day the
+  //     activity was logged (typo / quick correction window).
+  //   - DIRECTOR / SUPER_ADMIN can edit any time as a corrective override.
 
   async update(id: string, dto: UpdateActivityDto, user: UserContext): Promise<ActivityItem> {
     const before = await this.findById(id, user);
-    // Owner-or-admin: SALES_ENGINEER can edit own only; DIRECTOR/SALES_MANAGER edit all
     await this.authz.requirePermission(user, 'activity', 'edit', { ownerId: before.ownerUserId });
+
+    const isAdminOverride = user.roleName === 'DIRECTOR' || user.roleName === 'SUPER_ADMIN';
+    if (!isAdminOverride) {
+      const isOwner = before.ownerUserId === user.id;
+      const sameDay =
+        before.createdAt.toDateString() === new Date().toDateString();
+      if (!isOwner) {
+        throw new ForbiddenException('Only the creator can edit this activity');
+      }
+      if (!sameDay) {
+        throw new BadRequestException(
+          'Activities can only be edited on the day they were logged. Add a follow-up activity instead.',
+        );
+      }
+    }
 
     await this.prisma.activity.update({
       where: { id },
@@ -181,15 +200,26 @@ export class ActivitiesService {
   }
 
   // ─── Delete ────────────────────────────────────────────────────────────
+  // V1 rule:
+  //   - Creator can always delete their own activity.
+  //   - SALES_MANAGER can delete any activity in their team scope.
+  //   - DIRECTOR / SUPER_ADMIN can delete any activity (corrective override).
+  //   - All other roles: 403.
 
   async delete(id: string, user: UserContext): Promise<void> {
     const before = await this.findById(id, user);
-    await this.authz.requirePermission(user, 'activity', 'edit', { ownerId: before.ownerUserId });
-    // Soft business rule: activities older than 7 days cannot be deleted (audit integrity)
-    const ageMs = Date.now() - before.createdAt.getTime();
-    if (ageMs > 7 * 24 * 3600 * 1000 && user.roleName !== 'DIRECTOR' && user.roleName !== 'SUPER_ADMIN') {
-      throw new BadRequestException('Activity is older than 7 days; only DIRECTOR can delete');
+    await this.authz.requirePermission(user, 'activity', 'delete', { ownerId: before.ownerUserId });
+
+    const isCreator      = before.ownerUserId === user.id;
+    const isSalesManager = user.roleName === 'SALES_MANAGER';
+    const isAdminOverride = user.roleName === 'DIRECTOR' || user.roleName === 'SUPER_ADMIN';
+
+    if (!isCreator && !isSalesManager && !isAdminOverride) {
+      throw new ForbiddenException(
+        'Only the creator, Sales Manager, or Director can delete this activity.',
+      );
     }
+
     await this.prisma.activity.delete({ where: { id } });
   }
 
